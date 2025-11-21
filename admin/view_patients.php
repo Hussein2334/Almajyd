@@ -584,126 +584,130 @@ foreach ($patients as $patient) {
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-warning { background: #fef3c7; color: #92400e; }
 
-        /* Print Styles - IMPROVED FOR PDF FORM STYLE */
-        @media print {
-            .no-print { display: none !important; }
-            body { 
-                background: white !important; 
-                font-family: Arial, sans-serif !important;
-                color: black !important;
-                font-size: 12px !important;
-            }
-            
-            .main { 
-                padding: 0 !important; 
-                margin: 0 !important;
-                max-width: none !important;
-            }
-            
-            .table-card { 
-                box-shadow: none !important; 
-                border: none !important;
-                padding: 0 !important;
-            }
-            
-            /* PDF FORM STYLING */
-            .pdf-form {
-                width: 100%;
-                border: 2px solid #000;
-                padding: 20px;
-                margin-bottom: 20px;
-                page-break-inside: avoid;
-            }
-            
-            .pdf-header {
-                text-align: center;
-                margin-bottom: 20px;
-                border-bottom: 2px solid #000;
-                padding-bottom: 10px;
-            }
-            
-            .pdf-header h1 {
-                font-size: 24px;
-                font-weight: bold;
-                margin-bottom: 5px;
-                color: black;
-            }
-            
-            .pdf-header .clinic-info {
-                font-size: 14px;
-                color: black;
-            }
-            
-            .pdf-patient-info {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 15px;
-                margin-bottom: 20px;
-            }
-            
-            .pdf-field {
-                margin-bottom: 10px;
-            }
-            
-            .pdf-field-label {
-                font-weight: bold;
-                margin-bottom: 5px;
-                border-bottom: 1px solid #ccc;
-                padding-bottom: 2px;
-            }
-            
-            .pdf-field-value {
-                min-height: 20px;
-                padding: 5px;
-            }
-            
-            .pdf-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 15px;
-            }
-            
-            .pdf-table th {
-                background: #f0f0f0;
-                padding: 8px 10px;
-                text-align: left;
-                font-weight: bold;
-                border: 1px solid #000;
-                font-size: 11px;
-            }
-            
-            .pdf-table td {
-                padding: 8px 10px;
-                border: 1px solid #000;
-                font-size: 11px;
-            }
-            
-            .print-footer {
-                text-align: center;
-                margin-top: 30px;
-                font-size: 10px;
-                color: #666;
-                border-top: 1px solid #ccc;
-                padding-top: 10px;
-            }
+        /* PRINT FORM STYLING - EXACTLY LIKE YOUR IMAGE */
+        .print-form-container {
+            display: none;
         }
-
-        /* Print Header */
+        
+        .print-form {
+            width: 210mm;
+            min-height: 297mm;
+            padding: 20mm;
+            margin: 0 auto;
+            background: white;
+            font-family: Arial, sans-serif;
+            color: black;
+            line-height: 1.4;
+        }
+        
         .print-header {
             text-align: center;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #334155;
-            padding-bottom: 15px;
+            margin-bottom: 8mm;
+            border-bottom: 1px solid #000;
+            padding-bottom: 4mm;
         }
         
         .print-header h1 {
-            color: #1e293b;
-            margin-bottom: 5px;
+            font-size: 24pt;
+            font-weight: bold;
+            margin-bottom: 3mm;
+            color: black;
+            text-transform: uppercase;
         }
         
         .print-header .clinic-info {
-            color: #64748b;
-            font-size: 0.9rem;
+            font-size: 11pt;
+            color: black;
+            line-height: 1.6;
+        }
+        
+        .print-divider {
+            border-top: 1px solid #000;
+            margin: 4mm 0;
+        }
+        
+        .patient-info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6mm;
+            margin-bottom: 8mm;
+        }
+        
+        .info-section {
+            margin-bottom: 4mm;
+        }
+        
+        .info-label {
+            font-weight: bold;
+            margin-bottom: 2mm;
+            font-size: 11pt;
+        }
+        
+        .info-value {
+            font-size: 11pt;
+            padding: 2mm 0;
+            border-bottom: 1px dashed #666;
+            min-height: 7mm;
+        }
+        
+        .treatment-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 6mm;
+            border: 1px solid #000;
+        }
+        
+        .treatment-table th {
+            background: #f0f0f0;
+            padding: 3mm;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #000;
+            font-size: 10pt;
+        }
+        
+        .treatment-table td {
+            padding: 3mm;
+            border: 1px solid #000;
+            font-size: 10pt;
+            height: 20mm;
+            vertical-align: top;
+        }
+        
+        .print-footer {
+            text-align: center;
+            margin-top: 8mm;
+            font-size: 9pt;
+            color: #666;
+            border-top: 1px solid #ccc;
+            padding-top: 3mm;
+        }
+
+        /* Print Styles */
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            
+            .print-form-container,
+            .print-form-container * {
+                visibility: visible;
+            }
+            
+            .print-form {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                min-height: 100%;
+                margin: 0;
+                padding: 20mm;
+                box-shadow: none;
+            }
+            
+            .no-print {
+                display: none !important;
+            }
         }
 
         /* Table responsive container */
@@ -865,7 +869,7 @@ foreach ($patients as $patient) {
     <div class="main">
 
         <!-- Quick Statistics -->
-        <div class="stats-grid">
+        <div class="stats-grid no-print">
             <div class="stat-card patients">
                 <div class="stat-icon">
                     <i class="fas fa-users"></i>
@@ -897,7 +901,7 @@ foreach ($patients as $patient) {
         </div>
 
         <!-- Clickable Process Steps -->
-        <div class="steps-container">
+        <div class="steps-container no-print">
             <h2 class="steps-title">Patient Management Control Panel</h2>
             
             <div class="steps">
@@ -982,17 +986,17 @@ foreach ($patients as $patient) {
                         <i class="fas fa-times"></i>
                         Clear Filters
                     </a>
-                    <button type="button" onclick="printPatientForms()" class="btn btn-warning">
+                    <button type="button" onclick="printAllPatientForms()" class="btn btn-warning">
                         <i class="fas fa-print"></i>
-                        Print Patient Forms
+                        Print All Patient Forms
                     </button>
                 </div>
             </form>
         </div>
 
         <!-- Patients Table -->
-        <div class="table-card">
-            <h3 class="no-print">
+        <div class="table-card no-print">
+            <h3>
                 <i class="fas fa-list"></i>
                 All Patients
                 <small style="font-size: 0.9rem; color: #64748b; font-weight: normal;">
@@ -1013,6 +1017,7 @@ foreach ($patients as $patient) {
                             <th>Address</th>
                             <th>Registered By</th>
                             <th>Registration Date</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1021,7 +1026,7 @@ foreach ($patients as $patient) {
                         if (empty($patients_data)): 
                         ?>
                         <tr>
-                            <td colspan="9" style="text-align: center; padding: 20px; color: #64748b;">
+                            <td colspan="10" style="text-align: center; padding: 20px; color: #64748b;">
                                 <i class="fas fa-info-circle" style="font-size: 2rem; margin-bottom: 10px; display: block;"></i>
                                 No patients found matching your criteria.
                             </td>
@@ -1042,6 +1047,11 @@ foreach ($patients as $patient) {
                                 <td><?php echo $patient['address'] ? htmlspecialchars(substr($patient['address'], 0, 30)) . (strlen($patient['address']) > 30 ? '...' : '') : 'N/A'; ?></td>
                                 <td><?php echo $patient['created_by_name'] ?: 'System'; ?></td>
                                 <td><?php echo date('M j, Y', strtotime($patient['created_at'])); ?></td>
+                                <td>
+                                    <button class="btn btn-warning btn-sm" onclick="printSingleForm('<?php echo $patient['card_no']; ?>')">
+                                        <i class="fas fa-print"></i> Print Form
+                                    </button>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -1050,45 +1060,51 @@ foreach ($patients as $patient) {
             </div>
         </div>
 
-        <!-- PDF FORM STYLE PRINT SECTION -->
-        <div id="pdfForms" style="display: none;">
+        <!-- PRINT FORM SECTION - EXACTLY LIKE YOUR IMAGE -->
+        <div class="print-form-container" id="printForms">
             <?php foreach ($patients_data as $patient): ?>
-            <div class="pdf-form">
-                <div class="pdf-header">
+            <div class="print-form" id="form-<?php echo $patient['card_no']; ?>">
+                <div class="print-header">
                     <h1>ALMAJYD DISPENSARY</h1>
-                    <div class="clinic-info">TEL: +255 777 567 478 / +255 719 053 764</div>
-                    <div class="clinic-info">EMAIL: annykassim@gmail.com</div>
-                    <div class="clinic-info">TOMONDO - ZANZIBAR</div>
-                </div>
-                
-                <div class="pdf-patient-info">
-                    <div class="pdf-field">
-                        <div class="pdf-field-label">Name:</div>
-                        <div class="pdf-field-value"><?php echo htmlspecialchars($patient['full_name']); ?></div>
-                    </div>
-                    <div class="pdf-field">
-                        <div class="pdf-field-label">Date:</div>
-                        <div class="pdf-field-value"><?php echo date('d/m/Y'); ?></div>
-                    </div>
-                    <div class="pdf-field">
-                        <div class="pdf-field-label">Address:</div>
-                        <div class="pdf-field-value"><?php echo $patient['address'] ? htmlspecialchars($patient['address']) : '____________________'; ?></div>
-                    </div>
-                    <div class="pdf-field">
-                        <div class="pdf-field-label">Age:</div>
-                        <div class="pdf-field-value"><?php echo $patient['age'] ?: '____'; ?></div>
-                    </div>
-                    <div class="pdf-field">
-                        <div class="pdf-field-label">Card No:</div>
-                        <div class="pdf-field-value"><?php echo htmlspecialchars($patient['card_no']); ?></div>
-                    </div>
-                    <div class="pdf-field">
-                        <div class="pdf-field-label">Weight:</div>
-                        <div class="pdf-field-value"><?php echo $patient['weight'] ? $patient['weight'] . ' kg' : '____ kg'; ?></div>
+                    <div class="clinic-info">
+                        TEL: +255 777 567 478 / +255 719 053 764<br>
+                        EMAIL: annykassim@gmail.com<br>
+                        TOMONDO - ZANZIBAR
                     </div>
                 </div>
                 
-                <table class="pdf-table">
+                <div class="print-divider"></div>
+                
+                <div class="patient-info-grid">
+                    <div class="info-section">
+                        <div class="info-label">Name:</div>
+                        <div class="info-value"><?php echo htmlspecialchars($patient['full_name']); ?></div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">Date:</div>
+                        <div class="info-value"><?php echo date('d/m/Y'); ?></div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">Address:</div>
+                        <div class="info-value"><?php echo $patient['address'] ? htmlspecialchars($patient['address']) : ''; ?></div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">Age:</div>
+                        <div class="info-value"><?php echo $patient['age'] ?: ''; ?></div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">Card No:</div>
+                        <div class="info-value"><?php echo htmlspecialchars($patient['card_no']); ?></div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">Weight:</div>
+                        <div class="info-value"><?php echo $patient['weight'] ? $patient['weight'] . ' kg' : ''; ?></div>
+                    </div>
+                </div>
+                
+                <div class="print-divider"></div>
+                
+                <table class="treatment-table">
                     <thead>
                         <tr>
                             <th>Date</th>
@@ -1100,25 +1116,25 @@ foreach ($patients as $patient) {
                     </thead>
                     <tbody>
                         <tr>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
                         </tr>
                         <tr>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
                         </tr>
                         <tr>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
-                            <td style="height: 100px;">&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
+                            <td>&nbsp;</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1152,8 +1168,8 @@ foreach ($patients as $patient) {
                         <button class="btn btn-primary" onclick="window.location.href='dashboard.php'">
                             <i class="fas fa-tachometer-alt"></i> Back to Dashboard
                         </button>
-                        <button class="btn btn-success" onclick="printPatientForms()">
-                            <i class="fas fa-print"></i> Print Patient Forms
+                        <button class="btn btn-success" onclick="printAllPatientForms()">
+                            <i class="fas fa-print"></i> Print All Patient Forms
                         </button>
                     </div>
                     
@@ -1224,7 +1240,7 @@ foreach ($patients as $patient) {
                     <p>Generate comprehensive reports and analyze patient data.</p>
                     
                     <div class="action-grid">
-                        <div class="action-card" onclick="printPatientForms()">
+                        <div class="action-card" onclick="printAllPatientForms()">
                             <h4><i class="fas fa-print"></i> Print Patient Forms</h4>
                             <ul class="action-list">
                                 <li><i class="fas fa-check"></i> Individual patient forms</li>
@@ -1232,8 +1248,8 @@ foreach ($patients as $patient) {
                                 <li><i class="fas fa-check"></i> Professional design</li>
                             </ul>
                             <div class="action-buttons">
-                                <button class="btn btn-warning" onclick="printPatientForms()">
-                                    <i class="fas fa-print"></i> Print Forms
+                                <button class="btn btn-warning" onclick="printAllPatientForms()">
+                                    <i class="fas fa-print"></i> Print All Forms
                                 </button>
                             </div>
                         </div>
@@ -1295,23 +1311,81 @@ foreach ($patients as $patient) {
             content.innerHTML = stepsContent[num] || stepsContent[1];
         }
 
-        // Function to print patient forms in PDF style
-        function printPatientForms() {
-            // Hide all elements except the PDF forms
-            const elementsToHide = document.querySelectorAll('body > *:not(#pdfForms)');
-            elementsToHide.forEach(el => el.style.display = 'none');
+        // Function to print all patient forms
+        function printAllPatientForms() {
+            const printForms = document.getElementById('printForms');
+            printForms.style.display = 'block';
             
-            // Show the PDF forms
-            document.getElementById('pdfForms').style.display = 'block';
+            // Hide all forms first, then show them one by one for printing
+            const allForms = document.querySelectorAll('.print-form');
+            allForms.forEach(form => {
+                form.style.display = 'none';
+            });
             
-            // Print
-            window.print();
+            // Print each form on a separate page
+            let currentIndex = 0;
             
-            // Restore display after printing
-            setTimeout(() => {
-                elementsToHide.forEach(el => el.style.display = '');
-                document.getElementById('pdfForms').style.display = 'none';
-            }, 100);
+            function printNextForm() {
+                if (currentIndex < allForms.length) {
+                    // Hide all forms
+                    allForms.forEach(form => {
+                        form.style.display = 'none';
+                    });
+                    
+                    // Show current form
+                    allForms[currentIndex].style.display = 'block';
+                    
+                    // Print current form
+                    window.print();
+                    
+                    currentIndex++;
+                    
+                    // Wait a bit before printing next form
+                    if (currentIndex < allForms.length) {
+                        setTimeout(printNextForm, 500);
+                    } else {
+                        // Reset after all forms are printed
+                        setTimeout(() => {
+                            allForms.forEach(form => {
+                                form.style.display = 'block';
+                            });
+                            printForms.style.display = 'none';
+                        }, 500);
+                    }
+                }
+            }
+            
+            // Start printing
+            printNextForm();
+        }
+
+        // Function to print single patient form
+        function printSingleForm(cardNo) {
+            const printForms = document.getElementById('printForms');
+            const allForms = document.querySelectorAll('.print-form');
+            
+            // Hide all forms
+            allForms.forEach(form => {
+                form.style.display = 'none';
+            });
+            
+            // Show only the selected form
+            const singleForm = document.getElementById('form-' + cardNo);
+            if (singleForm) {
+                singleForm.style.display = 'block';
+                printForms.style.display = 'block';
+                
+                // Print the form
+                window.print();
+                
+                // Reset after printing
+                setTimeout(() => {
+                    allForms.forEach(form => {
+                        form.style.display = 'block';
+                    });
+                    printForms.style.display = 'none';
+                }, 500);
+            }
         }
 
         // Update time every minute

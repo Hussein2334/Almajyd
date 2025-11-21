@@ -903,7 +903,7 @@ $current_time = date('h:i A');
                     <div class="step-label">Users</div>
                 </a>
                 <div class="spacer"></div>
-                <a href="../view_patients.php" class="step">
+                <a href="view_patients.php" class="step">
                     3
                     <div class="step-label">Patients</div>
                 </a>

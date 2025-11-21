@@ -290,7 +290,138 @@ $growth_percentage = $previous_month_count > 0 ?
             flex-wrap: wrap;
         }
 
-     
+        /* PRINT FORM STYLING - EXACTLY LIKE YOUR IMAGE */
+        .print-form-container {
+            display: none;
+        }
+        
+        .print-form {
+            width: 210mm;
+            min-height: 297mm;
+            padding: 20mm;
+            margin: 0 auto;
+            background: white;
+            font-family: Arial, sans-serif;
+            color: black;
+            line-height: 1.4;
+        }
+        
+        .print-header {
+            text-align: center;
+            margin-bottom: 8mm;
+            border-bottom: 1px solid #000;
+            padding-bottom: 4mm;
+        }
+        
+        .print-header h1 {
+            font-size: 24pt;
+            font-weight: bold;
+            margin-bottom: 3mm;
+            color: black;
+            text-transform: uppercase;
+        }
+        
+        .print-header .clinic-info {
+            font-size: 11pt;
+            color: black;
+            line-height: 1.6;
+        }
+        
+        .print-divider {
+            border-top: 1px solid #000;
+            margin: 4mm 0;
+        }
+        
+        .report-period {
+            text-align: center;
+            margin: 4mm 0;
+            font-size: 12pt;
+            font-weight: bold;
+        }
+        
+        .stats-grid-print {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6mm;
+            margin: 6mm 0;
+        }
+        
+        .stat-item-print {
+            margin-bottom: 4mm;
+        }
+        
+        .stat-label-print {
+            font-weight: bold;
+            margin-bottom: 2mm;
+            font-size: 11pt;
+            border-bottom: 1px solid #666;
+            padding-bottom: 1mm;
+        }
+        
+        .stat-value-print {
+            font-size: 11pt;
+            padding: 2mm 0;
+        }
+        
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 6mm 0;
+            border: 1px solid #000;
+        }
+        
+        .summary-table th {
+            background: #f0f0f0;
+            padding: 3mm;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #000;
+            font-size: 10pt;
+        }
+        
+        .summary-table td {
+            padding: 3mm;
+            border: 1px solid #000;
+            font-size: 10pt;
+        }
+        
+        .print-footer {
+            text-align: center;
+            margin-top: 8mm;
+            font-size: 9pt;
+            color: #666;
+            border-top: 1px solid #ccc;
+            padding-top: 3mm;
+        }
+
+        /* Print Styles */
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            
+            .print-form-container,
+            .print-form-container * {
+                visibility: visible;
+            }
+            
+            .print-form {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                min-height: 100%;
+                margin: 0;
+                padding: 20mm;
+                box-shadow: none;
+            }
+            
+            .no-print {
+                display: none !important;
+            }
+        }
+
+        /* Regular Styles (Hidden in Print) */
         .steps-container {
             background: white;
             padding: 25px;
@@ -695,14 +826,6 @@ $growth_percentage = $previous_month_count > 0 ?
         .badge-primary { background: #dbeafe; color: #1e40af; }
         .badge-success { background: #d1fae5; color: #065f46; }
 
-        /* Print Styles */
-        @media print {
-            .no-print { display: none !important; }
-            body { background: white !important; }
-            .table-card, .chart-card { box-shadow: none !important; border: 1px solid #ddd !important; }
-            .main { padding: 0 !important; }
-        }
-
         /* MOBILE RESPONSIVE DESIGN */
         @media (max-width: 768px) {
             .topbar {
@@ -862,7 +985,7 @@ $growth_percentage = $previous_month_count > 0 ?
                     <i class="fas fa-arrow-left"></i>
                     Back to Dashboard
                 </a>
-                <button onclick="window.print()" class="btn btn-success">
+                <button onclick="printReport()" class="btn btn-success">
                     <i class="fas fa-print"></i>
                     Print Report
                 </button>
@@ -870,7 +993,7 @@ $growth_percentage = $previous_month_count > 0 ?
         </div>
 
         <!-- Clickable Process Steps with ACTIONS -->
-        <div class="steps-container">
+        <div class="steps-container no-print">
             <h2 class="steps-title">Reports & Analytics Control Panel</h2>
             
             <div class="steps">
@@ -947,84 +1070,211 @@ $growth_percentage = $previous_month_count > 0 ?
             </form>
         </div>
 
-        <!-- Registration Statistics -->
-        <div class="stats-grid">
-            <div class="stat-card registrations">
-                <div class="stat-icon">
-                    <i class="fas fa-user-plus"></i>
+        <!-- Regular Content (Hidden in Print) -->
+        <div class="no-print">
+            <!-- Registration Statistics -->
+            <div class="stats-grid">
+                <div class="stat-card registrations">
+                    <div class="stat-icon">
+                        <i class="fas fa-user-plus"></i>
+                    </div>
+                    <div class="stat-number"><?php echo $registration_stats['total_patients']; ?></div>
+                    <div class="stat-label">Total Registrations</div>
+                    <div class="growth-indicator <?php echo $growth_percentage >= 0 ? 'growth-positive' : 'growth-negative'; ?>">
+                        <i class="fas fa-arrow-<?php echo $growth_percentage >= 0 ? 'up' : 'down'; ?>"></i>
+                        <?php echo abs(round($growth_percentage, 1)); ?>% from previous month
+                    </div>
                 </div>
-                <div class="stat-number"><?php echo $registration_stats['total_patients']; ?></div>
-                <div class="stat-label">Total Registrations</div>
-                <div class="growth-indicator <?php echo $growth_percentage >= 0 ? 'growth-positive' : 'growth-negative'; ?>">
-                    <i class="fas fa-arrow-<?php echo $growth_percentage >= 0 ? 'up' : 'down'; ?>"></i>
-                    <?php echo abs(round($growth_percentage, 1)); ?>% from previous month
+                <div class="stat-card gender">
+                    <div class="stat-icon">
+                        <i class="fas fa-venus-mars"></i>
+                    </div>
+                    <div class="stat-number">
+                        <?php echo $registration_stats['male_patients'] . ' / ' . $registration_stats['female_patients']; ?>
+                    </div>
+                    <div class="stat-label">Male / Female Ratio</div>
+                </div>
+                <div class="stat-card age">
+                    <div class="stat-icon">
+                        <i class="fas fa-birthday-cake"></i>
+                    </div>
+                    <div class="stat-number"><?php echo round($registration_stats['avg_age'], 1); ?></div>
+                    <div class="stat-label">Average Age</div>
+                </div>
+                <div class="stat-card growth">
+                    <div class="stat-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <div class="stat-number"><?php echo $treatment_stats['total_visits'] ?? 0; ?></div>
+                    <div class="stat-label">Treatment Visits</div>
                 </div>
             </div>
-            <div class="stat-card gender">
-                <div class="stat-icon">
-                    <i class="fas fa-venus-mars"></i>
+
+            <!-- Charts Section -->
+            <div class="charts-grid">
+                <!-- Monthly Registration Trends -->
+                <div class="chart-card">
+                    <h3><i class="fas fa-chart-line"></i> Monthly Registration Trends</h3>
+                    <div class="chart-container">
+                        <canvas id="monthlyTrendsChart"></canvas>
+                    </div>
                 </div>
-                <div class="stat-number">
-                    <?php echo $registration_stats['male_patients'] . ' / ' . $registration_stats['female_patients']; ?>
+
+                <!-- Gender Distribution -->
+                <div class="chart-card">
+                    <h3><i class="fas fa-venus-mars"></i> Gender Distribution</h3>
+                    <div class="chart-container">
+                        <canvas id="genderDistributionChart"></canvas>
+                    </div>
                 </div>
-                <div class="stat-label">Male / Female Ratio</div>
+
+                <!-- Common Diagnoses -->
+                <div class="chart-card">
+                    <h3><i class="fas fa-stethoscope"></i> Common Diagnoses</h3>
+                    <div class="chart-container">
+                        <canvas id="diagnosesChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Treatment Statistics -->
+                <div class="chart-card">
+                    <h3><i class="fas fa-heartbeat"></i> Treatment Statistics</h3>
+                    <div class="chart-container">
+                        <canvas id="treatmentStatsChart"></canvas>
+                    </div>
+                </div>
             </div>
-            <div class="stat-card age">
-                <div class="stat-icon">
-                    <i class="fas fa-birthday-cake"></i>
+
+            <!-- Monthly Summaries Table -->
+            <div class="table-card">
+                <h3><i class="fas fa-calendar-alt"></i> Monthly Summaries (Last 12 Months)</h3>
+                <div class="table-responsive">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Month</th>
+                                <th>Total Patients</th>
+                                <th>Male</th>
+                                <th>Female</th>
+                                <th>Average Age</th>
+                                <th>Growth</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($monthly_summaries as $summary): ?>
+                            <tr>
+                                <td><strong><?php echo date('M Y', strtotime($summary['month'] . '-01')); ?></strong></td>
+                                <td><?php echo $summary['total_patients']; ?></td>
+                                <td>
+                                    <span class="badge badge-primary">
+                                        <?php echo $summary['male_patients']; ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge badge-success">
+                                        <?php echo $summary['female_patients']; ?>
+                                    </span>
+                                </td>
+                                <td><?php echo round($summary['avg_age'], 1); ?></td>
+                                <td>
+                                    <?php 
+                                    // Calculate growth (simplified)
+                                    $growth = $summary['total_patients'] > 0 ? '📈' : '➡️';
+                                    echo $growth;
+                                    ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
-                <div class="stat-number"><?php echo round($registration_stats['avg_age'], 1); ?></div>
-                <div class="stat-label">Average Age</div>
             </div>
-            <div class="stat-card growth">
-                <div class="stat-icon">
-                    <i class="fas fa-chart-line"></i>
+
+            <!-- Treatment History -->
+            <div class="table-card">
+                <h3><i class="fas fa-history"></i> Treatment History Summary</h3>
+                <div class="table-responsive">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Value</th>
+                                <th>Description</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Total Treatment Visits</strong></td>
+                                <td><?php echo $treatment_stats['total_visits'] ?? 0; ?></td>
+                                <td>Number of completed treatment sessions</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Unique Patients Treated</strong></td>
+                                <td><?php echo $treatment_stats['unique_patients'] ?? 0; ?></td>
+                                <td>Number of distinct patients receiving treatment</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Average Treatment Duration</strong></td>
+                                <td><?php echo round($treatment_stats['avg_treatment_days'] ?? 0, 1); ?> days</td>
+                                <td>Average time from diagnosis to completion</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
-                <div class="stat-number"><?php echo $treatment_stats['total_visits'] ?? 0; ?></div>
-                <div class="stat-label">Treatment Visits</div>
             </div>
         </div>
 
-        <!-- Charts Section -->
-        <div class="charts-grid">
-            <!-- Monthly Registration Trends -->
-            <div class="chart-card">
-                <h3><i class="fas fa-chart-line"></i> Monthly Registration Trends</h3>
-                <div class="chart-container">
-                    <canvas id="monthlyTrendsChart"></canvas>
+        <!-- PRINT FORM SECTION - EXACTLY LIKE YOUR IMAGE -->
+        <div class="print-form-container" id="printForms">
+            <div class="print-form">
+                <div class="print-header">
+                    <h1>ALMAJYD DISPENSARY</h1>
+                    <div class="clinic-info">
+                        TEL: +255 777 567 478 / +255 719 053 764<br>
+                        EMAIL: annykassim@gmail.com<br>
+                        TOMONDO - ZANZIBAR
+                    </div>
                 </div>
-            </div>
-
-            <!-- Gender Distribution -->
-            <div class="chart-card">
-                <h3><i class="fas fa-venus-mars"></i> Gender Distribution</h3>
-                <div class="chart-container">
-                    <canvas id="genderDistributionChart"></canvas>
+                
+                <div class="print-divider"></div>
+                
+                <div class="report-period">
+                    PATIENT STATISTICS REPORT - <?php echo date('F j, Y', strtotime($start_date)); ?> to <?php echo date('F j, Y', strtotime($end_date)); ?>
                 </div>
-            </div>
-
-            <!-- Common Diagnoses -->
-            <div class="chart-card">
-                <h3><i class="fas fa-stethoscope"></i> Common Diagnoses</h3>
-                <div class="chart-container">
-                    <canvas id="diagnosesChart"></canvas>
+                
+                <div class="print-divider"></div>
+                
+                <div class="stats-grid-print">
+                    <div class="stat-item-print">
+                        <div class="stat-label-print">Total Patient Registrations</div>
+                        <div class="stat-value-print"><?php echo $registration_stats['total_patients']; ?> patients</div>
+                    </div>
+                    <div class="stat-item-print">
+                        <div class="stat-label-print">Male Patients</div>
+                        <div class="stat-value-print"><?php echo $registration_stats['male_patients']; ?> patients</div>
+                    </div>
+                    <div class="stat-item-print">
+                        <div class="stat-label-print">Female Patients</div>
+                        <div class="stat-value-print"><?php echo $registration_stats['female_patients']; ?> patients</div>
+                    </div>
+                    <div class="stat-item-print">
+                        <div class="stat-label-print">Average Age</div>
+                        <div class="stat-value-print"><?php echo round($registration_stats['avg_age'], 1); ?> years</div>
+                    </div>
+                    <div class="stat-item-print">
+                        <div class="stat-label-print">Treatment Visits</div>
+                        <div class="stat-value-print"><?php echo $treatment_stats['total_visits'] ?? 0; ?> visits</div>
+                    </div>
+                    <div class="stat-item-print">
+                        <div class="stat-label-print">Unique Patients Treated</div>
+                        <div class="stat-value-print"><?php echo $treatment_stats['unique_patients'] ?? 0; ?> patients</div>
+                    </div>
                 </div>
-            </div>
-
-            <!-- Treatment Statistics -->
-            <div class="chart-card">
-                <h3><i class="fas fa-heartbeat"></i> Treatment Statistics</h3>
-                <div class="chart-container">
-                    <canvas id="treatmentStatsChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <!-- Monthly Summaries Table -->
-        <div class="table-card">
-            <h3><i class="fas fa-calendar-alt"></i> Monthly Summaries (Last 12 Months)</h3>
-            <div class="table-responsive">
-                <table class="simple-table">
+                
+                <div class="print-divider"></div>
+                
+                <h3 style="margin: 6mm 0 3mm 0; font-size: 12pt;">Monthly Registration Summary (Last 6 Months)</h3>
+                <table class="summary-table">
                     <thead>
                         <tr>
                             <th>Month</th>
@@ -1032,69 +1282,44 @@ $growth_percentage = $previous_month_count > 0 ?
                             <th>Male</th>
                             <th>Female</th>
                             <th>Average Age</th>
-                            <th>Growth</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($monthly_summaries as $summary): ?>
+                        <?php foreach (array_slice($monthly_summaries, 0, 6) as $summary): ?>
                         <tr>
-                            <td><strong><?php echo date('M Y', strtotime($summary['month'] . '-01')); ?></strong></td>
+                            <td><?php echo date('M Y', strtotime($summary['month'] . '-01')); ?></td>
                             <td><?php echo $summary['total_patients']; ?></td>
-                            <td>
-                                <span class="badge badge-primary">
-                                    <?php echo $summary['male_patients']; ?>
-                                </span>
-                            </td>
-                            <td>
-                                <span class="badge badge-success">
-                                    <?php echo $summary['female_patients']; ?>
-                                </span>
-                            </td>
+                            <td><?php echo $summary['male_patients']; ?></td>
+                            <td><?php echo $summary['female_patients']; ?></td>
                             <td><?php echo round($summary['avg_age'], 1); ?></td>
-                            <td>
-                                <?php 
-                                // Calculate growth (simplified)
-                                $growth = $summary['total_patients'] > 0 ? '📈' : '➡️';
-                                echo $growth;
-                                ?>
-                            </td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
-        </div>
-
-        <!-- Treatment History -->
-        <div class="table-card">
-            <h3><i class="fas fa-history"></i> Treatment History Summary</h3>
-            <div class="table-responsive">
-                <table class="simple-table">
+                
+                <div class="print-divider"></div>
+                
+                <h3 style="margin: 6mm 0 3mm 0; font-size: 12pt;">Common Diagnoses</h3>
+                <table class="summary-table">
                     <thead>
                         <tr>
-                            <th>Metric</th>
-                            <th>Value</th>
-                            <th>Description</th>
+                            <th>Diagnosis</th>
+                            <th>Frequency</th>
                         </tr>
                     </thead>
                     <tbody>
+                        <?php foreach ($common_diagnoses as $diagnosis): ?>
                         <tr>
-                            <td><strong>Total Treatment Visits</strong></td>
-                            <td><?php echo $treatment_stats['total_visits'] ?? 0; ?></td>
-                            <td>Number of completed treatment sessions</td>
+                            <td><?php echo htmlspecialchars($diagnosis['diagnosis']); ?></td>
+                            <td><?php echo $diagnosis['frequency']; ?> cases</td>
                         </tr>
-                        <tr>
-                            <td><strong>Unique Patients Treated</strong></td>
-                            <td><?php echo $treatment_stats['unique_patients'] ?? 0; ?></td>
-                            <td>Number of distinct patients receiving treatment</td>
-                        </tr>
-                        <tr>
-                            <td><strong>Average Treatment Duration</strong></td>
-                            <td><?php echo round($treatment_stats['avg_treatment_days'] ?? 0, 1); ?> days</td>
-                            <td>Average time from diagnosis to completion</td>
-                        </tr>
+                        <?php endforeach; ?>
                     </tbody>
                 </table>
+                
+                <div class="print-footer">
+                    Patient Statistics Report - ALMAJYD DISPENSARY - Generated on: <?php echo date('F j, Y'); ?>
+                </div>
             </div>
         </div>
 
@@ -1120,8 +1345,8 @@ $growth_percentage = $previous_month_count > 0 ?
                         <button class="btn btn-primary" onclick="window.location.href='dashboard.php'">
                             <i class="fas fa-tachometer-alt"></i> Back to Dashboard
                         </button>
-                        <button class="btn btn-success" onclick="window.print()">
-                            <i class="fas fa-print"></i> Print Full Report
+                        <button class="btn btn-success" onclick="printReport()">
+                            <i class="fas fa-print"></i> Print Report
                         </button>
                     </div>
                     
@@ -1258,6 +1483,21 @@ $growth_percentage = $previous_month_count > 0 ?
             content.innerHTML = stepsContent[num] || stepsContent[1];
         }
 
+        // Function to print report in the desired format
+        function printReport() {
+            const printForms = document.getElementById('printForms');
+            printForms.style.display = 'block';
+            
+            // Print after a short delay to ensure content is visible
+            setTimeout(() => {
+                window.print();
+                // Hide print forms after printing
+                setTimeout(() => {
+                    printForms.style.display = 'none';
+                }, 500);
+            }, 500);
+        }
+
         // Update time every minute
         function updateTime() {
             const now = new Date();
@@ -1382,13 +1622,6 @@ $growth_percentage = $previous_month_count > 0 ?
                 }
             });
         });
-
-        // Auto-print if print parameter is set
-        <?php if (isset($_GET['print'])): ?>
-        window.onload = function() {
-            window.print();
-        }
-        <?php endif; ?>
     </script>
 </body>
 </html>
