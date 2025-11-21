@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard - Clickable Process Steps</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f8fafc;
+      color: #334155;
+    }
+    .topbar {
+      background: white;
+      padding: 20px 40px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar h1 { font-size: 26px; font-weight: 700; }
+    .user {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #f1f5f9;
+      padding: 10px 18px;
+      border-radius: 12px;
+    }
+
+    .main { padding: 40px; max-width: 1400px; margin: 0 auto; }
+
+    /* Clickable Steps */
+    .steps {
+      display: flex;
+      align-items: center;
+      margin: 60px 0;
+      position: relative;
+      justify-content: center;
+    }
+    .steps::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 80px;
+      right: 80px;
+      height: 5px;
+      background: #e2e8f0;
+      border-radius: 3px;
+      z-index: 1;
+    }
+    .step {
+      width: 70px;
+      height: 70px;
+      background: white;
+      border: 6px solid #e2e8f0;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 28px;
+      color: #64748b;
+      z-index: 2;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    .step:hover {
+      transform: scale(1.1);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    }
+    .step.active {
+      border-color: #10b981;
+      color: white;
+      background: #10b981;
+      box-shadow: 0 0 20px rgba(16,185,129,0.4);
+    }
+    .spacer { flex-grow: 1; min-width: 80px; }
+    .spacer-short { flex-grow: 1; min-width: 40px; }
+
+    /* Content area that changes per step */
+    .content-area {
+      margin-top: 50px;
+      padding: 40px;
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+      min-height: 500px;
+      font-size: 18px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 28px;
+      margin-top: 30px;
+    }
+    .card {
+      background: #f8fafc;
+      padding: 30px;
+      border-radius: 16px;
+      text-align: center;
+      border: 2px dashed #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <h1>Admin Dashboard - Tanzania</h1>
+    <div class="user">
+      <div style="width:44px;height:44px;background:#10b981;border-radius:50%"></div>
+      <div>
+        <div style="font-weight:600;">Admin TZ</div>
+        <small>admin@tz.co</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- Clickable 1-2-3 Steps -->
+    <div class="steps">
+      <div class="step active" onclick="showStep(1)">1</div>
+      <div class="spacer"></div>
+      <div class="step" onclick="showStep(2)">2</div>
+      <div class="spacer-short"></div>
+      <div class="step" onclick="showStep(3)">3</div>
+    </div>
+
+    <!-- Content changes when you click -->
+    <div class="content-area" id="content">
+      <h2>Karibu! Chagua hatua →</h2>
+      <p>Bonyeza namba 1, 2 au 3 ili uone maudhui ya hatua husika.</p>
+      
+      <div class="grid">
+        <div class="card">Bonyeza namba ili kuanza</div>
+        <div class="card">Hatua za mchakato</div>
+        <div class="card">Rahisi na haraka</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function showStep(num) {
+      // Remove active class from all
+      document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+      // Add active to clicked
+      event.target.classList.add('active');
+
+      // Change content
+      const content = document.getElementById('content');
+      if (num === 1) {
+        content.innerHTML = `
+          <h2 style="color:#10b981">Hatua ya 1: Kuanza Mchakato</h2>
+          <p>Hapa unaanza mchakato wako. Ingiza taarifa za awali.</p>
+          <div class="grid">
+            <div class="card"><strong>Jina:</strong> Juma Ali</div>
+            <div class="card"><strong>Tarehe:</strong> 17 Nov 2025</div>
+            <div class="card"><strong>Aina:</strong> Ombi Jipya</div>
+          </div>
+        `;
+      }
+      if (num === 2) {
+        content.innerHTML = `
+          <h2 style="color:#3b82f6">Hatua ya 2: Kukagua Taarifa</h2>
+          <p>Taarifa zinachunguzwa na timu yetu.</p>
+          <div class="grid">
+            <div class="card">Inasubiri uthibitisho</div>
+            <div class="card">Maafisa: 3 wamepewa kazi</div>
+            <div class="card">Muda uliobaki: masaa 24</div>
+          </div>
+        `;
+      }
+      if (num === 3) {
+        content.innerHTML = `
+          <h2 style="color:#f59e0b">Hatua ya 3: Kukamilisha</h2>
+          <p>Mchakato umekaribia kumalizika!</p>
+          <div class="grid">
+            <div class="card">Thibitisha malipo</div>
+            <div class="card">Pata hati rasmi</div>
+            <div class="card">Asante kwa kutumia huduma yetu!</div>
+          </div>
+        `;
+      }
+    }
+  </script>
+
+</body>
+</html>
