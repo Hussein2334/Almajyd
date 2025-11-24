@@ -115,6 +115,25 @@ $monthly_summary_query = "
 
 $monthly_summaries = $pdo->query($monthly_summary_query)->fetchAll(PDO::FETCH_ASSOC);
 
+// Get doctor performance stats
+$doctor_stats_query = "
+    SELECT 
+        u.full_name as doctor_name,
+        COUNT(cf.id) as total_consultations,
+        COUNT(DISTINCT cf.patient_id) as unique_patients,
+        AVG(TIMESTAMPDIFF(DAY, cf.created_at, cf.updated_at)) as avg_treatment_days
+    FROM checking_forms cf
+    LEFT JOIN users u ON cf.doctor_id = u.id
+    WHERE cf.status = 'completed'
+    AND DATE(cf.created_at) BETWEEN ? AND ?
+    GROUP BY cf.doctor_id, u.full_name
+    ORDER BY total_consultations DESC
+";
+
+$stmt = $pdo->prepare($doctor_stats_query);
+$stmt->execute([$start_date, $end_date]);
+$doctor_stats = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 // Calculate growth percentages
 $current_month_count = $registration_stats['total_patients'];
 $previous_month = date('Y-m', strtotime('-1 month'));
@@ -132,7 +151,7 @@ $growth_percentage = $previous_month_count > 0 ?
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Patient Reports - Almajyd Dispensary</title>
+    <title>Reports & Analytics - Almajyd Dispensary</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -1003,7 +1022,7 @@ $growth_percentage = $previous_month_count > 0 ?
             <div>
                 <h1 class="page-title">
                     <i class="fas fa-chart-bar"></i>
-                    Patient Reports & Analytics
+                    Reports & Analytics
                 </h1>
                 <p style="color: #64748b; margin-top: 5px;">Comprehensive patient statistics and treatment analysis</p>
             </div>
@@ -1041,7 +1060,7 @@ $growth_percentage = $previous_month_count > 0 ?
                 <div class="spacer"></div>
                 <div class="step" onclick="showStep(4)">
                     4
-                    <div class="step-label">Monthly Reports</div>
+                    <div class="step-label">Doctor Performance</div>
                 </div>
             </div>
 
@@ -1089,7 +1108,7 @@ $growth_percentage = $previous_month_count > 0 ?
                     </button>
                 </div>
                 <div class="filter-group">
-                    <a href="patient_reports.php" class="btn btn-warning">
+                    <a href="reports.php" class="btn btn-warning">
                         <i class="fas fa-sync"></i>
                         Reset
                     </a>
@@ -1249,6 +1268,92 @@ $growth_percentage = $previous_month_count > 0 ?
                     </table>
                 </div>
             </div>
+
+            <!-- Doctor Performance -->
+            <div class="table-card">
+                <h3><i class="fas fa-user-md"></i> Doctor Performance</h3>
+                <div class="table-responsive">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Doctor Name</th>
+                                <th>Total Consultations</th>
+                                <th>Unique Patients</th>
+                                <th>Avg Treatment Days</th>
+                                <th>Performance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($doctor_stats)): ?>
+                            <tr>
+                                <td colspan="5" style="text-align: center; color: #64748b;">
+                                    No doctor performance data available for the selected period.
+                                </td>
+                            </tr>
+                            <?php else: ?>
+                                <?php foreach ($doctor_stats as $doctor): ?>
+                                <tr>
+                                    <td><strong><?php echo htmlspecialchars($doctor['doctor_name']); ?></strong></td>
+                                    <td><?php echo $doctor['total_consultations']; ?></td>
+                                    <td><?php echo $doctor['unique_patients']; ?></td>
+                                    <td><?php echo round($doctor['avg_treatment_days'], 1); ?> days</td>
+                                    <td>
+                                        <?php
+                                        $performance = '';
+                                        if ($doctor['total_consultations'] >= 20) {
+                                            $performance = '⭐ Excellent';
+                                        } elseif ($doctor['total_consultations'] >= 10) {
+                                            $performance = '👍 Good';
+                                        } else {
+                                            $performance = '📊 Average';
+                                        }
+                                        echo $performance;
+                                        ?>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Common Diagnoses Table -->
+            <div class="table-card">
+                <h3><i class="fas fa-diagnoses"></i> Common Diagnoses</h3>
+                <div class="table-responsive">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Diagnosis</th>
+                                <th>Frequency</th>
+                                <th>Percentage</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($common_diagnoses)): ?>
+                            <tr>
+                                <td colspan="3" style="text-align: center; color: #64748b;">
+                                    No diagnosis data available for the selected period.
+                                </td>
+                            </tr>
+                            <?php else: 
+                                $total_diagnoses = array_sum(array_column($common_diagnoses, 'frequency'));
+                                ?>
+                                <?php foreach ($common_diagnoses as $diagnosis): 
+                                    $percentage = ($diagnosis['frequency'] / $total_diagnoses) * 100;
+                                ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($diagnosis['diagnosis']); ?></td>
+                                    <td><?php echo $diagnosis['frequency']; ?> cases</td>
+                                    <td><?php echo round($percentage, 1); ?>%</td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
 
         <!-- PRINT FORM SECTION - WITH LOGO AND SIGNATURE -->
@@ -1271,7 +1376,7 @@ $growth_percentage = $previous_month_count > 0 ?
                 <div class="print-divider"></div>
                 
                 <div class="report-period">
-                    PATIENT STATISTICS REPORT - <?php echo date('F j, Y', strtotime($start_date)); ?> to <?php echo date('F j, Y', strtotime($end_date)); ?>
+                    COMPREHENSIVE STATISTICS REPORT - <?php echo date('F j, Y', strtotime($start_date)); ?> to <?php echo date('F j, Y', strtotime($end_date)); ?>
                 </div>
                 
                 <div class="print-divider"></div>
@@ -1337,13 +1442,19 @@ $growth_percentage = $previous_month_count > 0 ?
                         <tr>
                             <th>Diagnosis</th>
                             <th>Frequency</th>
+                            <th>Percentage</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($common_diagnoses as $diagnosis): ?>
+                        <?php 
+                        $total_diagnoses = array_sum(array_column($common_diagnoses, 'frequency'));
+                        foreach ($common_diagnoses as $diagnosis): 
+                            $percentage = ($diagnosis['frequency'] / $total_diagnoses) * 100;
+                        ?>
                         <tr>
                             <td><?php echo htmlspecialchars($diagnosis['diagnosis']); ?></td>
                             <td><?php echo $diagnosis['frequency']; ?> cases</td>
+                            <td><?php echo round($percentage, 1); ?>%</td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -1364,7 +1475,7 @@ $growth_percentage = $previous_month_count > 0 ?
                 </div>
                 
                 <div class="print-footer">
-                    Patient Statistics Report - ALMAJYD DISPENSARY - Generated on: <?php echo date('F j, Y'); ?>
+                    Comprehensive Statistics Report - ALMAJYD DISPENSARY - Generated on: <?php echo date('F j, Y'); ?>
                 </div>
             </div>
         </div>
@@ -1416,11 +1527,11 @@ $growth_percentage = $previous_month_count > 0 ?
                         </div>
                         
                         <div class="action-card" onclick="showStep(4)">
-                            <h4><i class="fas fa-calendar-alt"></i> Monthly Reports</h4>
+                            <h4><i class="fas fa-user-md"></i> Doctor Performance</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Monthly performance</li>
-                                <li><i class="fas fa-check"></i> Comparative analysis</li>
-                                <li><i class="fas fa-check"></i> Trend identification</li>
+                                <li><i class="fas fa-check"></i> Doctor productivity</li>
+                                <li><i class="fas fa-check"></i> Consultation patterns</li>
+                                <li><i class="fas fa-check"></i> Performance metrics</li>
                             </ul>
                         </div>
                     </div>
@@ -1492,34 +1603,34 @@ $growth_percentage = $previous_month_count > 0 ?
                     </div>
                 `,
                 4: `
-                    <h2 style="color:#8b5cf6; margin-bottom: 15px;"><i class="fas fa-calendar-alt"></i> Monthly Reports & Summaries</h2>
-                    <p>Comprehensive monthly performance reports and comparative analysis.</p>
+                    <h2 style="color:#8b5cf6; margin-bottom: 15px;"><i class="fas fa-user-md"></i> Doctor Performance Reports</h2>
+                    <p>Monitor and analyze doctor performance, consultation patterns, and productivity.</p>
                     
                     <div class="action-grid">
                         <div class="action-card">
-                            <h4><i class="fas fa-chart-pie"></i> Monthly Performance</h4>
+                            <h4><i class="fas fa-chart-pie"></i> Performance Metrics</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Monthly registration totals</li>
-                                <li><i class="fas fa-check"></i> Treatment completion rates</li>
-                                <li><i class="fas fa-check"></i> Service utilization trends</li>
+                                <li><i class="fas fa-check"></i> Consultation volume</li>
+                                <li><i class="fas fa-check"></i> Patient satisfaction</li>
+                                <li><i class="fas fa-check"></i> Treatment efficiency</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-chart-bar"></i> Comparative Analysis</h4>
+                            <h4><i class="fas fa-trophy"></i> Productivity Analysis</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Month-over-month growth</li>
-                                <li><i class="fas fa-check"></i> Year-over-year comparison</li>
-                                <li><i class="fas fa-check"></i> Seasonal performance</li>
+                                <li><i class="fas fa-check"></i> Cases handled</li>
+                                <li><i class="fas fa-check"></i> Time management</li>
+                                <li><i class="fas fa-check"></i> Quality of care</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-trending-up"></i> Trend Identification</h4>
+                            <h4><i class="fas fa-trending-up"></i> Performance Trends</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Long-term patterns</li>
-                                <li><i class="fas fa-check"></i> Predictive analytics</li>
-                                <li><i class="fas fa-check"></i> Strategic planning</li>
+                                <li><i class="fas fa-check"></i> Monthly performance</li>
+                                <li><i class="fas fa-check"></i> Improvement tracking</li>
+                                <li><i class="fas fa-check"></i> Benchmark analysis</li>
                             </ul>
                         </div>
                     </div>

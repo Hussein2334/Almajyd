@@ -70,6 +70,29 @@ foreach ($patients as $patient) {
     if ($patient['gender'] == 'female') $female_count++;
     if (date('Y-m-d', strtotime($patient['created_at'])) == $today) $today_count++;
 }
+
+// Function to get patient treatment history
+function getPatientTreatmentHistory($pdo, $patient_id) {
+    $query = "
+        SELECT 
+            cf.*,
+            u.full_name as doctor_name,
+            p.medicine_name,
+            p.dosage,
+            p.frequency,
+            p.duration,
+            p.instructions
+        FROM checking_forms cf
+        LEFT JOIN users u ON cf.doctor_id = u.id
+        LEFT JOIN prescriptions p ON cf.id = p.checking_form_id
+        WHERE cf.patient_id = ?
+        ORDER BY cf.created_at DESC
+    ";
+    
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$patient_id]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 ?>
 
 <!DOCTYPE html>
@@ -584,7 +607,7 @@ foreach ($patients as $patient) {
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-warning { background: #fef3c7; color: #92400e; }
 
-        /* PRINT FORM STYLING - EXACTLY LIKE YOUR IMAGE */
+        /* PRINT FORM STYLING - WITH LOGO AND PATIENT HISTORY */
         .print-form-container {
             display: none;
         }
@@ -605,6 +628,18 @@ foreach ($patients as $patient) {
             margin-bottom: 8mm;
             border-bottom: 1px solid #000;
             padding-bottom: 4mm;
+        }
+        
+        .print-logo {
+            text-align: center;
+            margin-bottom: 3mm;
+        }
+        
+        .print-logo img {
+            height: 25mm;
+            width: auto;
+            display: block;
+            margin: 0 auto;
         }
         
         .print-header h1 {
@@ -650,6 +685,40 @@ foreach ($patients as $patient) {
             min-height: 7mm;
         }
         
+        .treatment-history {
+            margin: 6mm 0;
+        }
+        
+        .treatment-history h3 {
+            font-size: 12pt;
+            margin-bottom: 3mm;
+            border-bottom: 1px solid #000;
+            padding-bottom: 1mm;
+        }
+        
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 3mm;
+            border: 1px solid #000;
+        }
+        
+        .history-table th {
+            background: #f0f0f0;
+            padding: 3mm;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #000;
+            font-size: 9pt;
+        }
+        
+        .history-table td {
+            padding: 3mm;
+            border: 1px solid #000;
+            font-size: 9pt;
+            vertical-align: top;
+        }
+        
         .treatment-table {
             width: 100%;
             border-collapse: collapse;
@@ -672,6 +741,21 @@ foreach ($patients as $patient) {
             font-size: 10pt;
             height: 20mm;
             vertical-align: top;
+        }
+        
+        .signature-section {
+            margin-top: 15mm;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .signature-line {
+            border-top: 1px solid #000;
+            width: 60mm;
+            text-align: center;
+            padding-top: 2mm;
+            font-size: 10pt;
         }
         
         .print-footer {
@@ -1060,11 +1144,18 @@ foreach ($patients as $patient) {
             </div>
         </div>
 
-        <!-- PRINT FORM SECTION - EXACTLY LIKE YOUR IMAGE -->
+        <!-- PRINT FORM SECTION - WITH LOGO AND PATIENT HISTORY -->
         <div class="print-form-container" id="printForms">
-            <?php foreach ($patients_data as $patient): ?>
+            <?php foreach ($patients_data as $patient): 
+                $treatment_history = getPatientTreatmentHistory($pdo, $patient['id']);
+            ?>
             <div class="print-form" id="form-<?php echo $patient['card_no']; ?>">
                 <div class="print-header">
+                    <!-- Logo Section -->
+                    <div class="print-logo">
+                        <img src="../images/logo.jpg" alt="Almajyd Dispensary Logo">
+                    </div>
+                    
                     <h1>ALMAJYD DISPENSARY</h1>
                     <div class="clinic-info">
                         TEL: +255 777 567 478 / +255 719 053 764<br>
@@ -1102,8 +1193,42 @@ foreach ($patients as $patient) {
                     </div>
                 </div>
                 
+                <!-- Treatment History Section -->
+                <?php if (!empty($treatment_history)): ?>
+                <div class="treatment-history">
+                    <h3>PATIENT TREATMENT HISTORY</h3>
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Doctor</th>
+                                <th>Symptoms</th>
+                                <th>Diagnosis</th>
+                                <th>Medicine</th>
+                                <th>Dosage</th>
+                                <th>Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($treatment_history as $history): ?>
+                            <tr>
+                                <td><?php echo date('d/m/Y', strtotime($history['created_at'])); ?></td>
+                                <td><?php echo htmlspecialchars($history['doctor_name'] ?: 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($history['symptoms'] ?: 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($history['diagnosis'] ?: 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($history['medicine_name'] ?: 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($history['dosage'] ?: 'N/A'); ?></td>
+                                <td><?php echo htmlspecialchars($history['duration'] ?: 'N/A'); ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php endif; ?>
+                
                 <div class="print-divider"></div>
                 
+                <h3 style="margin: 6mm 0 3mm 0; font-size: 12pt;">CURRENT TREATMENT</h3>
                 <table class="treatment-table">
                     <thead>
                         <tr>
@@ -1138,6 +1263,20 @@ foreach ($patients as $patient) {
                         </tr>
                     </tbody>
                 </table>
+                
+                <!-- Signature Section -->
+                <div class="signature-section">
+                    <div class="signature-line">
+                        Prepared By:<br>
+                        <strong><?php echo $_SESSION['full_name']; ?></strong><br>
+                        Administrator
+                    </div>
+                    <div class="signature-line">
+                        Date: <?php echo date('F j, Y'); ?><br>
+                        <strong>Doctor's Signature</strong><br>
+                        &nbsp;
+                    </div>
+                </div>
                 
                 <div class="print-footer">
                     Patient Medical Record - ALMAJYD DISPENSARY - Generated on: <?php echo date('F j, Y'); ?>

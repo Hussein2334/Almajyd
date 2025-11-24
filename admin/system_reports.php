@@ -17,114 +17,154 @@ $current_month = date('Y-m');
 $start_date = isset($_GET['start_date']) ? $_GET['start_date'] : date('Y-m-01');
 $end_date = isset($_GET['end_date']) ? $_GET['end_date'] : date('Y-m-t');
 
-// Get registration statistics
-$registration_stats_query = "
+// Get system statistics - USING ONLY EXISTING TABLES
+$system_stats_query = "
     SELECT 
-        COUNT(*) as total_patients,
-        COUNT(CASE WHEN gender = 'male' THEN 1 END) as male_patients,
-        COUNT(CASE WHEN gender = 'female' THEN 1 END) as female_patients,
-        AVG(age) as avg_age,
-        MIN(created_at) as first_registration,
-        MAX(created_at) as last_registration
-    FROM patients 
-    WHERE DATE(created_at) BETWEEN ? AND ?
+        (SELECT COUNT(*) FROM patients) as total_patients,
+        (SELECT COUNT(*) FROM users WHERE role = 'doctor') as total_doctors,
+        (SELECT COUNT(*) FROM users WHERE role = 'admin') as total_admins,
+        (SELECT COUNT(*) FROM checking_forms) as total_consultations,
+        (SELECT COUNT(*) FROM prescriptions) as total_prescriptions,
+        (SELECT COUNT(*) FROM users) as total_users,
+        (SELECT COUNT(*) FROM patients WHERE DATE(created_at) = CURDATE()) as today_patients,
+        (SELECT COUNT(*) FROM checking_forms WHERE DATE(created_at) = CURDATE()) as today_consultations,
+        (SELECT COUNT(*) FROM prescriptions WHERE DATE(created_at) = CURDATE()) as today_prescriptions
 ";
 
-$stmt = $pdo->prepare($registration_stats_query);
-$stmt->execute([$start_date, $end_date]);
-$registration_stats = $stmt->fetch(PDO::FETCH_ASSOC);
+$system_stats = $pdo->query($system_stats_query)->fetch(PDO::FETCH_ASSOC);
 
-// Get monthly registration trends
-$monthly_trends_query = "
-    SELECT 
-        DATE_FORMAT(created_at, '%Y-%m') as month,
-        COUNT(*) as registrations,
-        COUNT(CASE WHEN gender = 'male' THEN 1 END) as male,
-        COUNT(CASE WHEN gender = 'female' THEN 1 END) as female
-    FROM patients 
-    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
-    GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-    ORDER BY month DESC
-    LIMIT 6
+// Get recent user activity from existing tables
+$recent_activity_query = "
+    (SELECT 
+        u.full_name,
+        u.role,
+        'Patient Registration' as activity_type,
+        CONCAT('Registered patient: ', p.full_name) as description,
+        p.created_at
+    FROM patients p
+    LEFT JOIN users u ON p.created_by = u.id
+    ORDER BY p.created_at DESC
+    LIMIT 10)
+    
+    UNION ALL
+    
+    (SELECT 
+        u.full_name,
+        u.role,
+        'Consultation' as activity_type,
+        CONCAT('Consultation for patient ID: ', cf.patient_id) as description,
+        cf.created_at
+    FROM checking_forms cf
+    LEFT JOIN users u ON cf.doctor_id = u.id
+    ORDER BY cf.created_at DESC
+    LIMIT 10)
+    
+    UNION ALL
+    
+    (SELECT 
+        u.full_name,
+        u.role,
+        'Prescription' as activity_type,
+        CONCAT('Prescribed: ', p.medicine_name) as description,
+        p.created_at
+    FROM prescriptions p
+    LEFT JOIN checking_forms cf ON p.checking_form_id = cf.id
+    LEFT JOIN users u ON cf.doctor_id = u.id
+    ORDER BY p.created_at DESC
+    LIMIT 10)
+    
+    ORDER BY created_at DESC
+    LIMIT 30
 ";
 
-$monthly_trends = $pdo->query($monthly_trends_query)->fetchAll(PDO::FETCH_ASSOC);
-$monthly_trends = array_reverse($monthly_trends); // Reverse to show oldest first
+$recent_activity = $pdo->query($recent_activity_query)->fetchAll(PDO::FETCH_ASSOC);
 
-// Get daily registration trends for current month
-$daily_trends_query = "
+// Get system usage statistics
+$usage_stats_query = "
     SELECT 
         DATE(created_at) as date,
-        COUNT(*) as registrations
+        COUNT(*) as daily_registrations
     FROM patients 
     WHERE DATE(created_at) BETWEEN ? AND ?
     GROUP BY DATE(created_at)
-    ORDER BY date
+    ORDER BY date DESC
+    LIMIT 30
 ";
 
-$stmt = $pdo->prepare($daily_trends_query);
+$stmt = $pdo->prepare($usage_stats_query);
 $stmt->execute([$start_date, $end_date]);
-$daily_trends = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$usage_stats = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get treatment history statistics
-$treatment_stats_query = "
+// Get database size information
+$db_size_query = "
     SELECT 
-        COUNT(*) as total_visits,
-        COUNT(DISTINCT patient_id) as unique_patients,
-        AVG(TIMESTAMPDIFF(DAY, created_at, updated_at)) as avg_treatment_days
-    FROM checking_forms 
-    WHERE status = 'completed' 
-    AND DATE(created_at) BETWEEN ? AND ?
+        table_name,
+        ROUND(((data_length + index_length) / 1024 / 1024), 2) as size_mb,
+        table_rows
+    FROM information_schema.TABLES 
+    WHERE table_schema = ?
+    ORDER BY (data_length + index_length) DESC
 ";
 
-$stmt = $pdo->prepare($treatment_stats_query);
-$stmt->execute([$start_date, $end_date]);
-$treatment_stats = $stmt->fetch(PDO::FETCH_ASSOC);
+$db_name = 'hospital_management'; // Replace with your database name
+$stmt = $pdo->prepare($db_size_query);
+$stmt->execute([$db_name]);
+$db_tables = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get common diagnoses
-$common_diagnoses_query = "
+// Get peak usage hours from existing data
+$peak_hours_query = "
     SELECT 
-        diagnosis,
-        COUNT(*) as frequency
-    FROM checking_forms 
-    WHERE diagnosis IS NOT NULL 
-    AND diagnosis != ''
-    AND DATE(created_at) BETWEEN ? AND ?
-    GROUP BY diagnosis 
-    ORDER BY frequency DESC 
+        HOUR(created_at) as hour,
+        COUNT(*) as activity_count
+    FROM patients 
+    WHERE DATE(created_at) BETWEEN ? AND ?
+    GROUP BY HOUR(created_at)
+    ORDER BY activity_count DESC
     LIMIT 10
 ";
 
-$stmt = $pdo->prepare($common_diagnoses_query);
+$stmt = $pdo->prepare($peak_hours_query);
 $stmt->execute([$start_date, $end_date]);
-$common_diagnoses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$peak_hours = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get monthly summaries
-$monthly_summary_query = "
+// Calculate system health metrics
+$total_db_size = array_sum(array_column($db_tables, 'size_mb'));
+$total_records = array_sum(array_column($db_tables, 'table_rows'));
+
+// Get table growth statistics
+$growth_stats_query = "
     SELECT 
-        DATE_FORMAT(created_at, '%Y-%m') as month,
-        COUNT(*) as total_patients,
-        COUNT(CASE WHEN gender = 'male' THEN 1 END) as male_patients,
-        COUNT(CASE WHEN gender = 'female' THEN 1 END) as female_patients,
-        AVG(age) as avg_age
-    FROM patients 
-    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
-    GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-    ORDER BY month DESC
+        'patients' as table_name,
+        COUNT(*) as record_count,
+        MAX(created_at) as last_update
+    FROM patients
+    
+    UNION ALL
+    
+    SELECT 
+        'checking_forms' as table_name,
+        COUNT(*) as record_count,
+        MAX(created_at) as last_update
+    FROM checking_forms
+    
+    UNION ALL
+    
+    SELECT 
+        'prescriptions' as table_name,
+        COUNT(*) as record_count,
+        MAX(created_at) as last_update
+    FROM prescriptions
+    
+    UNION ALL
+    
+    SELECT 
+        'users' as table_name,
+        COUNT(*) as record_count,
+        MAX(created_at) as last_update
+    FROM users
 ";
 
-$monthly_summaries = $pdo->query($monthly_summary_query)->fetchAll(PDO::FETCH_ASSOC);
-
-// Calculate growth percentages
-$current_month_count = $registration_stats['total_patients'];
-$previous_month = date('Y-m', strtotime('-1 month'));
-$previous_month_query = "SELECT COUNT(*) as count FROM patients WHERE DATE_FORMAT(created_at, '%Y-%m') = ?";
-$stmt = $pdo->prepare($previous_month_query);
-$stmt->execute([$previous_month]);
-$previous_month_count = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
-
-$growth_percentage = $previous_month_count > 0 ? 
-    (($current_month_count - $previous_month_count) / $previous_month_count) * 100 : 0;
+$growth_stats = $pdo->query($growth_stats_query)->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <!DOCTYPE html>
@@ -132,7 +172,7 @@ $growth_percentage = $previous_month_count > 0 ?
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Patient Reports - Almajyd Dispensary</title>
+    <title>System Reports - Almajyd Dispensary</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -691,6 +731,16 @@ $growth_percentage = $previous_month_count > 0 ?
             background: #d97706;
             transform: translateY(-2px);
         }
+        
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
+        }
 
         /* Stats Grid */
         .stats-grid {
@@ -715,20 +765,24 @@ $growth_percentage = $previous_month_count > 0 ?
             box-shadow: 0 8px 30px rgba(0,0,0,0.12);
         }
         
-        .stat-card.registrations { border-left-color: #3b82f6; }
-        .stat-card.growth { border-left-color: #10b981; }
-        .stat-card.gender { border-left-color: #ef4444; }
-        .stat-card.age { border-left-color: #f59e0b; }
+        .stat-card.patients { border-left-color: #3b82f6; }
+        .stat-card.doctors { border-left-color: #10b981; }
+        .stat-card.consultations { border-left-color: #f59e0b; }
+        .stat-card.prescriptions { border-left-color: #ef4444; }
+        .stat-card.users { border-left-color: #8b5cf6; }
+        .stat-card.database { border-left-color: #06b6d4; }
         
         .stat-icon {
             font-size: 2.2em;
             margin-bottom: 10px;
         }
         
-        .stat-card.registrations .stat-icon { color: #3b82f6; }
-        .stat-card.growth .stat-icon { color: #10b981; }
-        .stat-card.gender .stat-icon { color: #ef4444; }
-        .stat-card.age .stat-icon { color: #f59e0b; }
+        .stat-card.patients .stat-icon { color: #3b82f6; }
+        .stat-card.doctors .stat-icon { color: #10b981; }
+        .stat-card.consultations .stat-icon { color: #f59e0b; }
+        .stat-card.prescriptions .stat-icon { color: #ef4444; }
+        .stat-card.users .stat-icon { color: #8b5cf6; }
+        .stat-card.database .stat-icon { color: #06b6d4; }
         
         .stat-number {
             font-size: 2.2em;
@@ -741,23 +795,6 @@ $growth_percentage = $previous_month_count > 0 ?
             color: #64748b;
             font-size: 0.85em;
             font-weight: 500;
-        }
-
-        .growth-indicator {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 5px;
-            font-size: 0.8rem;
-            margin-top: 5px;
-        }
-
-        .growth-positive {
-            color: #10b981;
-        }
-
-        .growth-negative {
-            color: #ef4444;
         }
 
         /* Charts Grid */
@@ -850,8 +887,26 @@ $growth_percentage = $previous_month_count > 0 ?
             font-weight: 600;
         }
         
-        .badge-primary { background: #dbeafe; color: #1e40af; }
         .badge-success { background: #d1fae5; color: #065f46; }
+        .badge-danger { background: #fee2e2; color: #991b1b; }
+        .badge-info { background: #dbeafe; color: #1e40af; }
+        .badge-warning { background: #fef3c7; color: #92400e; }
+
+        /* System Health Indicators */
+        .health-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        
+        .health-excellent { background: #d1fae5; color: #065f46; }
+        .health-good { background: #fef3c7; color: #92400e; }
+        .health-warning { background: #fed7aa; color: #9a3412; }
+        .health-critical { background: #fecaca; color: #991b1b; }
 
         /* MOBILE RESPONSIVE DESIGN */
         @media (max-width: 768px) {
@@ -986,7 +1041,7 @@ $growth_percentage = $previous_month_count > 0 ?
                 </div>
                 <div>
                     <div style="font-weight:600; font-size: 0.9rem;"><?php echo $_SESSION['full_name']; ?></div>
-                    <small style="font-size: 0.75rem;">Administrator</small>
+                    <small style="font-size: 0.75rem;">System Administrator</small>
                 </div>
             </div>
             <a href="../logout.php" class="logout-btn">
@@ -1002,10 +1057,10 @@ $growth_percentage = $previous_month_count > 0 ?
         <div class="page-header no-print">
             <div>
                 <h1 class="page-title">
-                    <i class="fas fa-chart-bar"></i>
-                    Patient Reports & Analytics
+                    <i class="fas fa-server"></i>
+                    System Reports & Analytics
                 </h1>
-                <p style="color: #64748b; margin-top: 5px;">Comprehensive patient statistics and treatment analysis</p>
+                <p style="color: #64748b; margin-top: 5px;">Comprehensive system performance and usage analytics</p>
             </div>
             <div class="page-actions">
                 <a href="dashboard.php" class="btn btn-warning">
@@ -1021,7 +1076,7 @@ $growth_percentage = $previous_month_count > 0 ?
 
         <!-- Clickable Process Steps with ACTIONS -->
         <div class="steps-container no-print">
-            <h2 class="steps-title">Reports & Analytics Control Panel</h2>
+            <h2 class="steps-title">System Analytics Control Panel</h2>
             
             <div class="steps">
                 <div class="step active" onclick="showStep(1)">
@@ -1031,40 +1086,40 @@ $growth_percentage = $previous_month_count > 0 ?
                 <div class="spacer"></div>
                 <div class="step" onclick="showStep(2)">
                     2
-                    <div class="step-label">Registration Stats</div>
+                    <div class="step-label">System Health</div>
                 </div>
                 <div class="spacer"></div>
                 <div class="step" onclick="showStep(3)">
                     3
-                    <div class="step-label">Treatment History</div>
+                    <div class="step-label">Activity Logs</div>
                 </div>
                 <div class="spacer"></div>
                 <div class="step" onclick="showStep(4)">
                     4
-                    <div class="step-label">Monthly Reports</div>
+                    <div class="step-label">Database Info</div>
                 </div>
             </div>
 
             <!-- Dynamic Content Area -->
             <div class="content-area" id="content">
-                <h2 style="color:#10b981; margin-bottom: 15px;">Welcome to Reports & Analytics</h2>
-                <p>Click on the numbers above to explore different aspects of patient data analysis.</p>
+                <h2 style="color:#10b981; margin-bottom: 15px;">Welcome to System Analytics</h2>
+                <p>Click on the numbers above to explore different aspects of system performance and usage.</p>
                 
                 <div class="action-grid">
                     <div class="action-card" onclick="showStep(2)">
-                        <h4><i class="fas fa-user-plus"></i> Registration Statistics</h4>
+                        <h4><i class="fas fa-heartbeat"></i> System Health</h4>
                         <ul class="action-list">
-                            <li><i class="fas fa-check"></i> Patient registration trends</li>
-                            <li><i class="fas fa-check"></i> Gender distribution analysis</li>
-                            <li><i class="fas fa-check"></i> Growth rate calculations</li>
+                            <li><i class="fas fa-check"></i> Database performance metrics</li>
+                            <li><i class="fas fa-check"></i> Resource utilization</li>
+                            <li><i class="fas fa-check"></i> Error rate monitoring</li>
                         </ul>
                     </div>
                     <div class="action-card" onclick="showStep(3)">
-                        <h4><i class="fas fa-stethoscope"></i> Treatment History</h4>
+                        <h4><i class="fas fa-list-alt"></i> Activity Monitoring</h4>
                         <ul class="action-list">
-                            <li><i class="fas fa-check"></i> Treatment completion rates</li>
-                            <li><i class="fas fa-check"></i> Common diagnoses analysis</li>
-                            <li><i class="fas fa-check"></i> Treatment duration statistics</li>
+                            <li><i class="fas fa-check"></i> User activity tracking</li>
+                            <li><i class="fas fa-check"></i> Security event logs</li>
+                            <li><i class="fas fa-check"></i> Peak usage analysis</li>
                         </ul>
                     </div>
                 </div>
@@ -1089,7 +1144,7 @@ $growth_percentage = $previous_month_count > 0 ?
                     </button>
                 </div>
                 <div class="filter-group">
-                    <a href="patient_reports.php" class="btn btn-warning">
+                    <a href="system_reports.php" class="btn btn-warning">
                         <i class="fas fa-sync"></i>
                         Reset
                     </a>
@@ -1099,116 +1154,235 @@ $growth_percentage = $previous_month_count > 0 ?
 
         <!-- Regular Content (Hidden in Print) -->
         <div class="no-print">
-            <!-- Registration Statistics -->
+            <!-- System Statistics -->
             <div class="stats-grid">
-                <div class="stat-card registrations">
+                <div class="stat-card patients">
                     <div class="stat-icon">
-                        <i class="fas fa-user-plus"></i>
+                        <i class="fas fa-users"></i>
                     </div>
-                    <div class="stat-number"><?php echo $registration_stats['total_patients']; ?></div>
-                    <div class="stat-label">Total Registrations</div>
-                    <div class="growth-indicator <?php echo $growth_percentage >= 0 ? 'growth-positive' : 'growth-negative'; ?>">
-                        <i class="fas fa-arrow-<?php echo $growth_percentage >= 0 ? 'up' : 'down'; ?>"></i>
-                        <?php echo abs(round($growth_percentage, 1)); ?>% from previous month
-                    </div>
+                    <div class="stat-number"><?php echo $system_stats['total_patients']; ?></div>
+                    <div class="stat-label">Total Patients</div>
                 </div>
-                <div class="stat-card gender">
+                <div class="stat-card doctors">
                     <div class="stat-icon">
-                        <i class="fas fa-venus-mars"></i>
+                        <i class="fas fa-user-md"></i>
                     </div>
-                    <div class="stat-number">
-                        <?php echo $registration_stats['male_patients'] . ' / ' . $registration_stats['female_patients']; ?>
-                    </div>
-                    <div class="stat-label">Male / Female Ratio</div>
+                    <div class="stat-number"><?php echo $system_stats['total_doctors']; ?></div>
+                    <div class="stat-label">Doctors</div>
                 </div>
-                <div class="stat-card age">
+                <div class="stat-card consultations">
                     <div class="stat-icon">
-                        <i class="fas fa-birthday-cake"></i>
+                        <i class="fas fa-stethoscope"></i>
                     </div>
-                    <div class="stat-number"><?php echo round($registration_stats['avg_age'], 1); ?></div>
-                    <div class="stat-label">Average Age</div>
+                    <div class="stat-number"><?php echo $system_stats['total_consultations']; ?></div>
+                    <div class="stat-label">Consultations</div>
                 </div>
-                <div class="stat-card growth">
+                <div class="stat-card prescriptions">
                     <div class="stat-icon">
-                        <i class="fas fa-chart-line"></i>
+                        <i class="fas fa-pills"></i>
                     </div>
-                    <div class="stat-number"><?php echo $treatment_stats['total_visits'] ?? 0; ?></div>
-                    <div class="stat-label">Treatment Visits</div>
+                    <div class="stat-number"><?php echo $system_stats['total_prescriptions']; ?></div>
+                    <div class="stat-label">Prescriptions</div>
+                </div>
+                <div class="stat-card users">
+                    <div class="stat-icon">
+                        <i class="fas fa-user-shield"></i>
+                    </div>
+                    <div class="stat-number"><?php echo $system_stats['total_users']; ?></div>
+                    <div class="stat-label">System Users</div>
+                </div>
+                <div class="stat-card database">
+                    <div class="stat-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <div class="stat-number"><?php echo round($total_db_size, 1); ?> MB</div>
+                    <div class="stat-label">Database Size</div>
+                </div>
+            </div>
+
+            <!-- Today's Activity -->
+            <div class="stats-grid">
+                <div class="stat-card patients">
+                    <div class="stat-icon">
+                        <i class="fas fa-calendar-day"></i>
+                    </div>
+                    <div class="stat-number"><?php echo $system_stats['today_patients']; ?></div>
+                    <div class="stat-label">Today's Patients</div>
+                </div>
+                <div class="stat-card consultations">
+                    <div class="stat-icon">
+                        <i class="fas fa-calendar-check"></i>
+                    </div>
+                    <div class="stat-number"><?php echo $system_stats['today_consultations']; ?></div>
+                    <div class="stat-label">Today's Consultations</div>
+                </div>
+                <div class="stat-card prescriptions">
+                    <div class="stat-icon">
+                        <i class="fas fa-pills"></i>
+                    </div>
+                    <div class="stat-number"><?php echo $system_stats['today_prescriptions']; ?></div>
+                    <div class="stat-label">Today's Prescriptions</div>
+                </div>
+                <div class="stat-card database">
+                    <div class="stat-icon">
+                        <i class="fas fa-hdd"></i>
+                    </div>
+                    <div class="stat-number"><?php echo $total_records; ?></div>
+                    <div class="stat-label">Total Records</div>
                 </div>
             </div>
 
             <!-- Charts Section -->
             <div class="charts-grid">
-                <!-- Monthly Registration Trends -->
+                <!-- Database Table Sizes -->
                 <div class="chart-card">
-                    <h3><i class="fas fa-chart-line"></i> Monthly Registration Trends</h3>
+                    <h3><i class="fas fa-database"></i> Database Table Sizes</h3>
                     <div class="chart-container">
-                        <canvas id="monthlyTrendsChart"></canvas>
+                        <canvas id="databaseSizesChart"></canvas>
                     </div>
                 </div>
 
-                <!-- Gender Distribution -->
+                <!-- Peak Usage Hours -->
                 <div class="chart-card">
-                    <h3><i class="fas fa-venus-mars"></i> Gender Distribution</h3>
+                    <h3><i class="fas fa-chart-bar"></i> Peak System Usage Hours</h3>
                     <div class="chart-container">
-                        <canvas id="genderDistributionChart"></canvas>
+                        <canvas id="peakHoursChart"></canvas>
                     </div>
                 </div>
 
-                <!-- Common Diagnoses -->
+                <!-- Daily Activity Trends -->
                 <div class="chart-card">
-                    <h3><i class="fas fa-stethoscope"></i> Common Diagnoses</h3>
+                    <h3><i class="fas fa-chart-line"></i> Daily Registration Trends</h3>
                     <div class="chart-container">
-                        <canvas id="diagnosesChart"></canvas>
+                        <canvas id="dailyActivityChart"></canvas>
                     </div>
                 </div>
 
-                <!-- Treatment Statistics -->
+                <!-- Table Growth Statistics -->
                 <div class="chart-card">
-                    <h3><i class="fas fa-heartbeat"></i> Treatment Statistics</h3>
+                    <h3><i class="fas fa-chart-pie"></i> Table Record Distribution</h3>
                     <div class="chart-container">
-                        <canvas id="treatmentStatsChart"></canvas>
+                        <canvas id="tableDistributionChart"></canvas>
                     </div>
                 </div>
             </div>
 
-            <!-- Monthly Summaries Table -->
+            <!-- Database Tables Information -->
             <div class="table-card">
-                <h3><i class="fas fa-calendar-alt"></i> Monthly Summaries (Last 12 Months)</h3>
+                <h3><i class="fas fa-table"></i> Database Tables Information</h3>
                 <div class="table-responsive">
                     <table class="simple-table">
                         <thead>
                             <tr>
-                                <th>Month</th>
-                                <th>Total Patients</th>
-                                <th>Male</th>
-                                <th>Female</th>
-                                <th>Average Age</th>
-                                <th>Growth</th>
+                                <th>Table Name</th>
+                                <th>Size (MB)</th>
+                                <th>Records</th>
+                                <th>Health Status</th>
+                                <th>Last Updated</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($monthly_summaries as $summary): ?>
+                            <?php foreach ($db_tables as $table): 
+                                $health_status = '';
+                                $health_class = '';
+                                
+                                if ($table['size_mb'] < 1) {
+                                    $health_status = 'Excellent';
+                                    $health_class = 'health-excellent';
+                                } elseif ($table['size_mb'] < 10) {
+                                    $health_status = 'Good';
+                                    $health_class = 'health-good';
+                                } elseif ($table['size_mb'] < 50) {
+                                    $health_status = 'Warning';
+                                    $health_class = 'health-warning';
+                                } else {
+                                    $health_status = 'Critical';
+                                    $health_class = 'health-critical';
+                                }
+                            ?>
                             <tr>
-                                <td><strong><?php echo date('M Y', strtotime($summary['month'] . '-01')); ?></strong></td>
-                                <td><?php echo $summary['total_patients']; ?></td>
+                                <td><strong><?php echo $table['table_name']; ?></strong></td>
+                                <td><?php echo $table['size_mb']; ?> MB</td>
+                                <td><?php echo number_format($table['table_rows']); ?></td>
                                 <td>
-                                    <span class="badge badge-primary">
-                                        <?php echo $summary['male_patients']; ?>
+                                    <span class="health-indicator <?php echo $health_class; ?>">
+                                        <?php echo $health_status; ?>
                                     </span>
                                 </td>
-                                <td>
-                                    <span class="badge badge-success">
-                                        <?php echo $summary['female_patients']; ?>
-                                    </span>
+                                <td><?php echo date('M j, Y'); ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Recent System Activity -->
+            <div class="table-card">
+                <h3><i class="fas fa-list-alt"></i> Recent System Activity</h3>
+                <div class="table-responsive">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Role</th>
+                                <th>Activity Type</th>
+                                <th>Description</th>
+                                <th>Timestamp</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($recent_activity)): ?>
+                            <tr>
+                                <td colspan="5" style="text-align: center; color: #64748b;">
+                                    No recent activity available.
                                 </td>
-                                <td><?php echo round($summary['avg_age'], 1); ?></td>
+                            </tr>
+                            <?php else: ?>
+                                <?php foreach ($recent_activity as $activity): ?>
+                                <tr>
+                                    <td><strong><?php echo htmlspecialchars($activity['full_name'] ?: 'System'); ?></strong></td>
+                                    <td>
+                                        <span class="badge <?php echo $activity['role'] == 'admin' ? 'badge-danger' : ($activity['role'] == 'doctor' ? 'badge-info' : 'badge-warning'); ?>">
+                                            <?php echo ucfirst($activity['role'] ?: 'System'); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($activity['activity_type']); ?></td>
+                                    <td><?php echo htmlspecialchars($activity['description']); ?></td>
+                                    <td><?php echo date('M j, Y H:i', strtotime($activity['created_at'])); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Table Growth Statistics -->
+            <div class="table-card">
+                <h3><i class="fas fa-chart-line"></i> Table Growth Statistics</h3>
+                <div class="table-responsive">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Table Name</th>
+                                <th>Record Count</th>
+                                <th>Last Update</th>
+                                <th>Growth Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($growth_stats as $growth): 
+                                $growth_status = $growth['record_count'] > 1000 ? 'High' : ($growth['record_count'] > 100 ? 'Medium' : 'Low');
+                            ?>
+                            <tr>
+                                <td><strong><?php echo ucfirst($growth['table_name']); ?></strong></td>
+                                <td><?php echo number_format($growth['record_count']); ?></td>
+                                <td><?php echo date('M j, Y H:i', strtotime($growth['last_update'])); ?></td>
                                 <td>
-                                    <?php 
-                                    // Calculate growth (simplified)
-                                    $growth = $summary['total_patients'] > 0 ? '📈' : '➡️';
-                                    echo $growth;
-                                    ?>
+                                    <span class="badge <?php echo $growth_status == 'High' ? 'badge-danger' : ($growth_status == 'Medium' ? 'badge-warning' : 'badge-info'); ?>">
+                                        <?php echo $growth_status; ?> Growth
+                                    </span>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
@@ -1217,34 +1391,54 @@ $growth_percentage = $previous_month_count > 0 ?
                 </div>
             </div>
 
-            <!-- Treatment History -->
+            <!-- Peak Usage Hours -->
             <div class="table-card">
-                <h3><i class="fas fa-history"></i> Treatment History Summary</h3>
+                <h3><i class="fas fa-chart-bar"></i> Peak Registration Hours</h3>
                 <div class="table-responsive">
                     <table class="simple-table">
                         <thead>
                             <tr>
-                                <th>Metric</th>
-                                <th>Value</th>
-                                <th>Description</th>
+                                <th>Hour</th>
+                                <th>Registration Count</th>
+                                <th>Time Period</th>
+                                <th>Usage Level</th>
                             </tr>
                         </thead>
                         <tbody>
+                            <?php if (empty($peak_hours)): ?>
                             <tr>
-                                <td><strong>Total Treatment Visits</strong></td>
-                                <td><?php echo $treatment_stats['total_visits'] ?? 0; ?></td>
-                                <td>Number of completed treatment sessions</td>
+                                <td colspan="4" style="text-align: center; color: #64748b;">
+                                    No peak usage data available.
+                                </td>
                             </tr>
-                            <tr>
-                                <td><strong>Unique Patients Treated</strong></td>
-                                <td><?php echo $treatment_stats['unique_patients'] ?? 0; ?></td>
-                                <td>Number of distinct patients receiving treatment</td>
-                            </tr>
-                            <tr>
-                                <td><strong>Average Treatment Duration</strong></td>
-                                <td><?php echo round($treatment_stats['avg_treatment_days'] ?? 0, 1); ?> days</td>
-                                <td>Average time from diagnosis to completion</td>
-                            </tr>
+                            <?php else: ?>
+                                <?php foreach ($peak_hours as $hour): 
+                                    $time_period = $hour['hour'] < 12 ? 'AM' : 'PM';
+                                    $display_hour = $hour['hour'] % 12 ?: 12;
+                                    $usage_level = '';
+                                    
+                                    if ($hour['activity_count'] >= 10) {
+                                        $usage_level = 'Very High';
+                                    } elseif ($hour['activity_count'] >= 5) {
+                                        $usage_level = 'High';
+                                    } elseif ($hour['activity_count'] >= 2) {
+                                        $usage_level = 'Medium';
+                                    } else {
+                                        $usage_level = 'Low';
+                                    }
+                                ?>
+                                <tr>
+                                    <td><strong><?php echo $display_hour . ':00 ' . $time_period; ?></strong></td>
+                                    <td><?php echo $hour['activity_count']; ?> registrations</td>
+                                    <td><?php echo $display_hour . ':00 - ' . $display_hour . ':59 ' . $time_period; ?></td>
+                                    <td>
+                                        <span class="badge <?php echo $usage_level == 'Very High' ? 'badge-danger' : ($usage_level == 'High' ? 'badge-warning' : 'badge-info'); ?>">
+                                            <?php echo $usage_level; ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
@@ -1271,59 +1465,59 @@ $growth_percentage = $previous_month_count > 0 ?
                 <div class="print-divider"></div>
                 
                 <div class="report-period">
-                    PATIENT STATISTICS REPORT - <?php echo date('F j, Y', strtotime($start_date)); ?> to <?php echo date('F j, Y', strtotime($end_date)); ?>
+                    SYSTEM PERFORMANCE REPORT - <?php echo date('F j, Y', strtotime($start_date)); ?> to <?php echo date('F j, Y', strtotime($end_date)); ?>
                 </div>
                 
                 <div class="print-divider"></div>
                 
                 <div class="stats-grid-print">
                     <div class="stat-item-print">
-                        <div class="stat-label-print">Total Patient Registrations</div>
-                        <div class="stat-value-print"><?php echo $registration_stats['total_patients']; ?> patients</div>
+                        <div class="stat-label-print">Total Patients in System</div>
+                        <div class="stat-value-print"><?php echo $system_stats['total_patients']; ?> patients</div>
                     </div>
                     <div class="stat-item-print">
-                        <div class="stat-label-print">Male Patients</div>
-                        <div class="stat-value-print"><?php echo $registration_stats['male_patients']; ?> patients</div>
+                        <div class="stat-label-print">Registered Doctors</div>
+                        <div class="stat-value-print"><?php echo $system_stats['total_doctors']; ?> doctors</div>
                     </div>
                     <div class="stat-item-print">
-                        <div class="stat-label-print">Female Patients</div>
-                        <div class="stat-value-print"><?php echo $registration_stats['female_patients']; ?> patients</div>
+                        <div class="stat-label-print">Total Consultations</div>
+                        <div class="stat-value-print"><?php echo $system_stats['total_consultations']; ?> consultations</div>
                     </div>
                     <div class="stat-item-print">
-                        <div class="stat-label-print">Average Age</div>
-                        <div class="stat-value-print"><?php echo round($registration_stats['avg_age'], 1); ?> years</div>
+                        <div class="stat-label-print">Total Prescriptions</div>
+                        <div class="stat-value-print"><?php echo $system_stats['total_prescriptions']; ?> prescriptions</div>
                     </div>
                     <div class="stat-item-print">
-                        <div class="stat-label-print">Treatment Visits</div>
-                        <div class="stat-value-print"><?php echo $treatment_stats['total_visits'] ?? 0; ?> visits</div>
+                        <div class="stat-label-print">System Users</div>
+                        <div class="stat-value-print"><?php echo $system_stats['total_users']; ?> users</div>
                     </div>
                     <div class="stat-item-print">
-                        <div class="stat-label-print">Unique Patients Treated</div>
-                        <div class="stat-value-print"><?php echo $treatment_stats['unique_patients'] ?? 0; ?> patients</div>
+                        <div class="stat-label-print">Database Size</div>
+                        <div class="stat-value-print"><?php echo round($total_db_size, 2); ?> MB</div>
                     </div>
                 </div>
                 
                 <div class="print-divider"></div>
                 
-                <h3 style="margin: 6mm 0 3mm 0; font-size: 12pt;">Monthly Registration Summary (Last 6 Months)</h3>
+                <h3 style="margin: 6mm 0 3mm 0; font-size: 12pt;">Database Tables Information</h3>
                 <table class="summary-table">
                     <thead>
                         <tr>
-                            <th>Month</th>
-                            <th>Total Patients</th>
-                            <th>Male</th>
-                            <th>Female</th>
-                            <th>Average Age</th>
+                            <th>Table Name</th>
+                            <th>Size (MB)</th>
+                            <th>Records</th>
+                            <th>Health Status</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach (array_slice($monthly_summaries, 0, 6) as $summary): ?>
+                        <?php foreach ($db_tables as $table): 
+                            $health_status = $table['size_mb'] < 10 ? 'Good' : ($table['size_mb'] < 50 ? 'Warning' : 'Critical');
+                        ?>
                         <tr>
-                            <td><?php echo date('M Y', strtotime($summary['month'] . '-01')); ?></td>
-                            <td><?php echo $summary['total_patients']; ?></td>
-                            <td><?php echo $summary['male_patients']; ?></td>
-                            <td><?php echo $summary['female_patients']; ?></td>
-                            <td><?php echo round($summary['avg_age'], 1); ?></td>
+                            <td><?php echo $table['table_name']; ?></td>
+                            <td><?php echo $table['size_mb']; ?> MB</td>
+                            <td><?php echo number_format($table['table_rows']); ?></td>
+                            <td><?php echo $health_status; ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -1331,21 +1525,41 @@ $growth_percentage = $previous_month_count > 0 ?
                 
                 <div class="print-divider"></div>
                 
-                <h3 style="margin: 6mm 0 3mm 0; font-size: 12pt;">Common Diagnoses</h3>
+                <h3 style="margin: 6mm 0 3mm 0; font-size: 12pt;">System Usage Summary</h3>
                 <table class="summary-table">
                     <thead>
                         <tr>
-                            <th>Diagnosis</th>
-                            <th>Frequency</th>
+                            <th>Metric</th>
+                            <th>Today</th>
+                            <th>Total</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($common_diagnoses as $diagnosis): ?>
                         <tr>
-                            <td><?php echo htmlspecialchars($diagnosis['diagnosis']); ?></td>
-                            <td><?php echo $diagnosis['frequency']; ?> cases</td>
+                            <td>Patient Registrations</td>
+                            <td><?php echo $system_stats['today_patients']; ?></td>
+                            <td><?php echo $system_stats['total_patients']; ?></td>
+                            <td>Active</td>
                         </tr>
-                        <?php endforeach; ?>
+                        <tr>
+                            <td>Consultations</td>
+                            <td><?php echo $system_stats['today_consultations']; ?></td>
+                            <td><?php echo $system_stats['total_consultations']; ?></td>
+                            <td>Active</td>
+                        </tr>
+                        <tr>
+                            <td>Prescriptions</td>
+                            <td><?php echo $system_stats['today_prescriptions']; ?></td>
+                            <td><?php echo $system_stats['total_prescriptions']; ?></td>
+                            <td>Active</td>
+                        </tr>
+                        <tr>
+                            <td>Database Records</td>
+                            <td>N/A</td>
+                            <td><?php echo number_format($total_records); ?></td>
+                            <td>Stable</td>
+                        </tr>
                     </tbody>
                 </table>
                 
@@ -1354,7 +1568,7 @@ $growth_percentage = $previous_month_count > 0 ?
                     <div class="signature-line">
                         Prepared By:<br>
                         <strong><?php echo $_SESSION['full_name']; ?></strong><br>
-                        Administrator
+                        System Administrator
                     </div>
                     <div class="signature-line">
                         Date: <?php echo date('F j, Y'); ?><br>
@@ -1364,7 +1578,7 @@ $growth_percentage = $previous_month_count > 0 ?
                 </div>
                 
                 <div class="print-footer">
-                    Patient Statistics Report - ALMAJYD DISPENSARY - Generated on: <?php echo date('F j, Y'); ?>
+                    System Performance Report - ALMAJYD DISPENSARY - Generated on: <?php echo date('F j, Y'); ?>
                 </div>
             </div>
         </div>
@@ -1384,142 +1598,142 @@ $growth_percentage = $previous_month_count > 0 ?
             
             const stepsContent = {
                 1: `
-                    <h2 style="color:#10b981; margin-bottom: 15px;"><i class="fas fa-chart-bar"></i> Reports Overview</h2>
-                    <p>Access comprehensive analytics and insights about patient data and treatment patterns.</p>
+                    <h2 style="color:#10b981; margin-bottom: 15px;"><i class="fas fa-server"></i> System Reports Overview</h2>
+                    <p>Access comprehensive system analytics and performance monitoring tools.</p>
                     
                     <div class="action-buttons" style="margin-bottom: 20px;">
                         <button class="btn btn-primary" onclick="window.location.href='dashboard.php'">
                             <i class="fas fa-tachometer-alt"></i> Back to Dashboard
                         </button>
                         <button class="btn btn-success" onclick="printReport()">
-                            <i class="fas fa-print"></i> Print Report
+                            <i class="fas fa-print"></i> Print System Report
                         </button>
                     </div>
                     
                     <div class="action-grid">
                         <div class="action-card" onclick="showStep(2)">
-                            <h4><i class="fas fa-user-plus"></i> Registration Analytics</h4>
+                            <h4><i class="fas fa-heartbeat"></i> System Health</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Patient registration trends</li>
-                                <li><i class="fas fa-check"></i> Demographic analysis</li>
-                                <li><i class="fas fa-check"></i> Growth rate monitoring</li>
+                                <li><i class="fas fa-check"></i> Database performance metrics</li>
+                                <li><i class="fas fa-check"></i> Resource utilization</li>
+                                <li><i class="fas fa-check"></i> Error rate monitoring</li>
                             </ul>
                         </div>
                         
                         <div class="action-card" onclick="showStep(3)">
-                            <h4><i class="fas fa-stethoscope"></i> Treatment Analysis</h4>
+                            <h4><i class="fas fa-list-alt"></i> Activity Monitoring</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Treatment completion rates</li>
-                                <li><i class="fas fa-check"></i> Diagnosis frequency</li>
-                                <li><i class="fas fa-check"></i> Treatment duration stats</li>
+                                <li><i class="fas fa-check"></i> User activity tracking</li>
+                                <li><i class="fas fa-check"></i> Security event logs</li>
+                                <li><i class="fas fa-check"></i> Peak usage analysis</li>
                             </ul>
                         </div>
                         
                         <div class="action-card" onclick="showStep(4)">
-                            <h4><i class="fas fa-calendar-alt"></i> Monthly Reports</h4>
+                            <h4><i class="fas fa-database"></i> Database Management</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Monthly performance</li>
-                                <li><i class="fas fa-check"></i> Comparative analysis</li>
-                                <li><i class="fas fa-check"></i> Trend identification</li>
+                                <li><i class="fas fa-check"></i> Table size analysis</li>
+                                <li><i class="fas fa-check"></i> Storage optimization</li>
+                                <li><i class="fas fa-check"></i> Backup status</li>
                             </ul>
                         </div>
                     </div>
                 `,
                 2: `
-                    <h2 style="color:#3b82f6; margin-bottom: 15px;"><i class="fas fa-user-plus"></i> Registration Statistics</h2>
-                    <p>Analyze patient registration patterns, demographic distribution, and growth trends.</p>
+                    <h2 style="color:#3b82f6; margin-bottom: 15px;"><i class="fas fa-heartbeat"></i> System Health Monitoring</h2>
+                    <p>Monitor system performance, resource utilization, and health metrics.</p>
                     
                     <div class="action-grid">
                         <div class="action-card">
-                            <h4><i class="fas fa-chart-line"></i> Registration Trends</h4>
+                            <h4><i class="fas fa-database"></i> Database Performance</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Monthly registration patterns</li>
-                                <li><i class="fas fa-check"></i> Seasonal variations</li>
-                                <li><i class="fas fa-check"></i> Growth rate analysis</li>
+                                <li><i class="fas fa-check"></i> Table size monitoring</li>
+                                <li><i class="fas fa-check"></i> Query performance</li>
+                                <li><i class="fas fa-check"></i> Connection health</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-venus-mars"></i> Demographic Analysis</h4>
+                            <h4><i class="fas fa-memory"></i> Resource Utilization</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Gender distribution</li>
-                                <li><i class="fas fa-check"></i> Age group analysis</li>
-                                <li><i class="fas fa-check"></i> Geographic patterns</li>
+                                <li><i class="fas fa-check"></i> Memory usage tracking</li>
+                                <li><i class="fas fa-check"></i> CPU performance</li>
+                                <li><i class="fas fa-check"></i> Storage capacity</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-calendar-day"></i> Daily Registration Patterns</h4>
+                            <h4><i class="fas fa-bug"></i> Error Monitoring</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Peak registration days</li>
-                                <li><i class="fas fa-check"></i> Time-based analysis</li>
-                                <li><i class="fas fa-check"></i> Capacity planning</li>
+                                <li><i class="fas fa-check"></i> Error rate analysis</li>
+                                <li><i class="fas fa-check"></i> Exception tracking</li>
+                                <li><i class="fas fa-check"></i> Debug information</li>
                             </ul>
                         </div>
                     </div>
                 `,
                 3: `
-                    <h2 style="color:#f59e0b; margin-bottom: 15px;"><i class="fas fa-stethoscope"></i> Treatment History Analysis</h2>
-                    <p>Examine treatment patterns, common diagnoses, and healthcare service utilization.</p>
+                    <h2 style="color:#f59e0b; margin-bottom: 15px;"><i class="fas fa-list-alt"></i> Activity & Security Monitoring</h2>
+                    <p>Track user activities, security events, and system usage patterns.</p>
                     
                     <div class="action-grid">
                         <div class="action-card">
-                            <h4><i class="fas fa-heartbeat"></i> Treatment Completion</h4>
+                            <h4><i class="fas fa-user-clock"></i> User Activity Logs</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Treatment success rates</li>
-                                <li><i class="fas fa-check"></i> Average treatment duration</li>
-                                <li><i class="fas fa-check"></i> Follow-up patterns</li>
+                                <li><i class="fas fa-check"></i> Login/logout tracking</li>
+                                <li><i class="fas fa-check"></i> Page access monitoring</li>
+                                <li><i class="fas fa-check"></i> Action auditing</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-diagnoses"></i> Common Diagnoses</h4>
+                            <h4><i class="fas fa-shield-alt"></i> Security Events</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Most frequent conditions</li>
-                                <li><i class="fas fa-check"></i> Seasonal illness patterns</li>
-                                <li><i class="fas fa-check"></i> Treatment effectiveness</li>
+                                <li><i class="fas fa-check"></i> Failed login attempts</li>
+                                <li><i class="fas fa-check"></i> Access violations</li>
+                                <li><i class="fas fa-check"></i> Security alerts</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-user-md"></i> Healthcare Utilization</h4>
+                            <h4><i class="fas fa-chart-bar"></i> Usage Patterns</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Service frequency</li>
-                                <li><i class="fas fa-check"></i> Resource allocation</li>
-                                <li><i class="fas fa-check"></i> Patient retention</li>
+                                <li><i class="fas fa-check"></i> Peak usage hours</li>
+                                <li><i class="fas fa-check"></i> Feature utilization</li>
+                                <li><i class="fas fa-check"></i> Performance trends</li>
                             </ul>
                         </div>
                     </div>
                 `,
                 4: `
-                    <h2 style="color:#8b5cf6; margin-bottom: 15px;"><i class="fas fa-calendar-alt"></i> Monthly Reports & Summaries</h2>
-                    <p>Comprehensive monthly performance reports and comparative analysis.</p>
+                    <h2 style="color:#8b5cf6; margin-bottom: 15px;"><i class="fas fa-database"></i> Database Management & Analytics</h2>
+                    <p>Manage database performance, storage, and optimization strategies.</p>
                     
                     <div class="action-grid">
                         <div class="action-card">
-                            <h4><i class="fas fa-chart-pie"></i> Monthly Performance</h4>
+                            <h4><i class="fas fa-hdd"></i> Storage Analysis</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Monthly registration totals</li>
-                                <li><i class="fas fa-check"></i> Treatment completion rates</li>
-                                <li><i class="fas fa-check"></i> Service utilization trends</li>
+                                <li><i class="fas fa-check"></i> Table size distribution</li>
+                                <li><i class="fas fa-check"></i> Growth trends</li>
+                                <li><i class="fas fa-check"></i> Optimization opportunities</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-chart-bar"></i> Comparative Analysis</h4>
+                            <h4><i class="fas fa-backup"></i> Backup Management</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Month-over-month growth</li>
-                                <li><i class="fas fa-check"></i> Year-over-year comparison</li>
-                                <li><i class="fas fa-check"></i> Seasonal performance</li>
+                                <li><i class="fas fa-check"></i> Backup schedules</li>
+                                <li><i class="fas fa-check"></i> Recovery procedures</li>
+                                <li><i class="fas fa-check"></i> Storage management</li>
                             </ul>
                         </div>
                         
                         <div class="action-card">
-                            <h4><i class="fas fa-trending-up"></i> Trend Identification</h4>
+                            <h4><i class="fas fa-wrench"></i> Maintenance Tools</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Long-term patterns</li>
-                                <li><i class="fas fa-check"></i> Predictive analytics</li>
-                                <li><i class="fas fa-check"></i> Strategic planning</li>
+                                <li><i class="fas fa-check"></i> Optimization scripts</li>
+                                <li><i class="fas fa-check"></i> Cleanup procedures</li>
+                                <li><i class="fas fa-check"></i> Performance tuning</li>
                             </ul>
                         </div>
                     </div>
@@ -1560,15 +1774,79 @@ $growth_percentage = $previous_month_count > 0 ?
 
         // Charts
         document.addEventListener('DOMContentLoaded', function() {
-            // Monthly Trends Chart
-            const monthlyCtx = document.getElementById('monthlyTrendsChart').getContext('2d');
-            new Chart(monthlyCtx, {
+            // Database Sizes Chart
+            const dbSizesCtx = document.getElementById('databaseSizesChart').getContext('2d');
+            new Chart(dbSizesCtx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($db_tables, 'table_name')); ?>,
+                    datasets: [{
+                        label: 'Size (MB)',
+                        data: <?php echo json_encode(array_column($db_tables, 'size_mb')); ?>,
+                        backgroundColor: '#3b82f6',
+                        borderColor: '#1d4ed8',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Size (MB)'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Peak Hours Chart
+            const peakHoursCtx = document.getElementById('peakHoursChart').getContext('2d');
+            new Chart(peakHoursCtx, {
                 type: 'line',
                 data: {
-                    labels: <?php echo json_encode(array_column($monthly_trends, 'month')); ?>,
+                    labels: <?php echo json_encode(array_map(function($hour) { 
+                        $display_hour = $hour['hour'] % 12 ?: 12;
+                        $period = $hour['hour'] < 12 ? 'AM' : 'PM';
+                        return $display_hour + ':00 ' + $period;
+                    }, $peak_hours)); ?>,
                     datasets: [{
-                        label: 'Total Registrations',
-                        data: <?php echo json_encode(array_column($monthly_trends, 'registrations')); ?>,
+                        label: 'Registration Count',
+                        data: <?php echo json_encode(array_column($peak_hours, 'activity_count')); ?>,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        }
+                    }
+                }
+            });
+
+            // Daily Activity Chart
+            const dailyActivityCtx = document.getElementById('dailyActivityChart').getContext('2d');
+            new Chart(dailyActivityCtx, {
+                type: 'line',
+                data: {
+                    labels: <?php echo json_encode(array_column($usage_stats, 'date')); ?>,
+                    datasets: [{
+                        label: 'Daily Registrations',
+                        data: <?php echo json_encode(array_column($usage_stats, 'daily_registrations')); ?>,
                         borderColor: '#3b82f6',
                         backgroundColor: 'rgba(59, 130, 246, 0.1)',
                         tension: 0.4,
@@ -1586,74 +1864,15 @@ $growth_percentage = $previous_month_count > 0 ?
                 }
             });
 
-            // Gender Distribution Chart
-            const genderCtx = document.getElementById('genderDistributionChart').getContext('2d');
-            new Chart(genderCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Male', 'Female'],
-                    datasets: [{
-                        data: [
-                            <?php echo $registration_stats['male_patients']; ?>,
-                            <?php echo $registration_stats['female_patients']; ?>
-                        ],
-                        backgroundColor: ['#3b82f6', '#ec4899'],
-                        borderWidth: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                        }
-                    }
-                }
-            });
-
-            // Common Diagnoses Chart
-            const diagnosesCtx = document.getElementById('diagnosesChart').getContext('2d');
-            new Chart(diagnosesCtx, {
-                type: 'bar',
-                data: {
-                    labels: <?php echo json_encode(array_column($common_diagnoses, 'diagnosis')); ?>,
-                    datasets: [{
-                        label: 'Frequency',
-                        data: <?php echo json_encode(array_column($common_diagnoses, 'frequency')); ?>,
-                        backgroundColor: '#10b981',
-                        borderColor: '#059669',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: false
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true
-                        }
-                    }
-                }
-            });
-
-            // Treatment Statistics Chart
-            const treatmentCtx = document.getElementById('treatmentStatsChart').getContext('2d');
-            new Chart(treatmentCtx, {
+            // Table Distribution Chart
+            const tableDistributionCtx = document.getElementById('tableDistributionChart').getContext('2d');
+            new Chart(tableDistributionCtx, {
                 type: 'pie',
                 data: {
-                    labels: ['Completed Treatments', 'Unique Patients'],
+                    labels: <?php echo json_encode(array_column($growth_stats, 'table_name')); ?>,
                     datasets: [{
-                        data: [
-                            <?php echo $treatment_stats['total_visits'] ?? 0; ?>,
-                            <?php echo $treatment_stats['unique_patients'] ?? 0; ?>
-                        ],
-                        backgroundColor: ['#f59e0b', '#ef4444'],
+                        data: <?php echo json_encode(array_column($growth_stats, 'record_count')); ?>,
+                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
                         borderWidth: 2
                     }]
                 },

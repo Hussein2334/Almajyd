@@ -742,16 +742,6 @@ $current_time = date('h:i A');
                 <div class="spacer"></div>
                 <div class="step" onclick="showStep(3)">
                     3
-                    <div class="step-label">Medical</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="showStep(4)">
-                    4
-                    <div class="step-label">Reports</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="showStep(5)">
-                    5
                     <div class="step-label">System</div>
                 </div>
             </div>
@@ -776,6 +766,14 @@ $current_time = date('h:i A');
                             <li><i class="fas fa-check"></i> View all patients</li>
                             <li><i class="fas fa-check"></i> Patient records</li>
                             <li><i class="fas fa-check"></i> Registration reports</li>
+                        </ul>
+                    </div>
+                    <div class="action-card" onclick="showStep(3)">
+                        <h4><i class="fas fa-cogs"></i> System Settings</h4>
+                        <ul class="action-list">
+                            <li><i class="fas fa-check"></i> System configuration</li>
+                            <li><i class="fas fa-check"></i> Backup management</li>
+                            <li><i class="fas fa-check"></i> Security settings</li>
                         </ul>
                     </div>
                 </div>
@@ -1013,102 +1011,6 @@ $current_time = date('h:i A');
                     </div>
                 `,
                 3: `
-                    <h2 style="color:#f59e0b; margin-bottom: 15px;"><i class="fas fa-stethoscope"></i> Medical Management</h2>
-                    <p>Oversee medical operations, treatments and laboratory processes.</p>
-                    
-                    <div class="action-grid">
-                        <div class="action-card" onclick="window.location.href='medical_records.php'">
-                            <h4><i class="fas fa-file-medical-alt"></i> Medical Records</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> View treatment history</li>
-                                <li><i class="fas fa-check"></i> Doctor assignments</li>
-                                <li><i class="fas fa-check"></i> Prescription tracking</li>
-                            </ul>
-                            <div class="action-buttons">
-                                <button class="btn btn-primary" onclick="window.location.href='medical_records.php'">
-                                    <i class="fas fa-folder-open"></i> View Records
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="action-card" onclick="window.location.href='lab_management.php'">
-                            <h4><i class="fas fa-vial"></i> Laboratory Management</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Test results monitoring</li>
-                                <li><i class="fas fa-check"></i> Lab technician assignments</li>
-                                <li><i class="fas fa-check"></i> Quality control</li>
-                            </ul>
-                            <div class="action-buttons">
-                                <button class="btn btn-success" onclick="window.location.href='lab_management.php'">
-                                    <i class="fas fa-microscope"></i> Manage Lab
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="action-card" onclick="window.location.href='pharmacy_management.php'">
-                            <h4><i class="fas fa-pills"></i> Pharmacy Control</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Medication inventory</li>
-                                <li><i class="fas fa-check"></i> Prescription tracking</li>
-                                <li><i class="fas fa-check"></i> Stock management</li>
-                            </ul>
-                            <div class="action-buttons">
-                                <button class="btn btn-warning" onclick="window.location.href='pharmacy_management.php'">
-                                    <i class="fas fa-capsules"></i> Pharmacy Control
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `,
-                4: `
-                    <h2 style="color:#8b5cf6; margin-bottom: 15px;"><i class="fas fa-chart-bar"></i> Reports & Analytics</h2>
-                    <p>Generate comprehensive reports and analyze system data.</p>
-                    
-                    <div class="action-grid">
-                        <div class="action-card" onclick="window.location.href='financial_reports.php'">
-                            <h4><i class="fas fa-money-bill-wave"></i> Financial Reports</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Revenue analysis</li>
-                                <li><i class="fas fa-check"></i> Payment tracking</li>
-                                <li><i class="fas fa-check"></i> Expense reports</li>
-                            </ul>
-                            <div class="action-buttons">
-                                <button class="btn btn-primary" onclick="window.location.href='financial_reports.php'">
-                                    <i class="fas fa-chart-line"></i> Financial Reports
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="action-card" onclick="window.location.href='performance_reports.php'">
-                            <h4><i class="fas fa-tachometer-alt"></i> Performance Reports</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Staff performance</li>
-                                <li><i class="fas fa-check"></i> Department efficiency</li>
-                                <li><i class="fas fa-check"></i> Service quality</li>
-                            </ul>
-                            <div class="action-buttons">
-                                <button class="btn btn-success" onclick="window.location.href='performance_reports.php'">
-                                    <i class="fas fa-chart-pie"></i> Performance
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="action-card" onclick="window.location.href='custom_reports.php'">
-                            <h4><i class="fas fa-cog"></i> Custom Reports</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Create custom queries</li>
-                                <li><i class="fas fa-check"></i> Export any data</li>
-                                <li><i class="fas fa-check"></i> Schedule reports</li>
-                            </ul>
-                            <div class="action-buttons">
-                                <button class="btn btn-warning" onclick="window.location.href='custom_reports.php'">
-                                    <i class="fas fa-magic"></i> Custom Reports
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `,
-                5: `
                     <h2 style="color:#ef4444; margin-bottom: 15px;"><i class="fas fa-cogs"></i> System Administration</h2>
                     <p>Configure system settings, backups and maintenance.</p>
                     
@@ -1141,7 +1043,7 @@ $current_time = date('h:i A');
                             </div>
                         </div>
                         
-                        <div class="action-card" onclick="window.location.href='user_reports.php'">
+                        <div class="action-card" onclick="window.location.href='system_reports.php'">
                             <h4><i class="fas fa-clipboard-list"></i> System Reports</h4>
                             <ul class="action-list">
                                 <li><i class="fas fa-check"></i> System activity overview</li>
@@ -1149,7 +1051,7 @@ $current_time = date('h:i A');
                                 <li><i class="fas fa-check"></i> Performance monitoring</li>
                             </ul>
                             <div class="action-buttons">
-                                <button class="btn btn-warning" onclick="window.location.href='user_reports.php'">
+                                <button class="btn btn-warning" onclick="window.location.href='system_reports.php'">
                                     <i class="fas fa-chart-bar"></i> View Reports
                                 </button>
                             </div>
