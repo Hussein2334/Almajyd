@@ -336,6 +336,7 @@ $lab_tests = $lab_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
             border: 1px solid #ffeaa7;
         }
     </style>
+ <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
     <div class="action-buttons no-print">
@@ -365,7 +366,7 @@ $lab_tests = $lab_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
                 <div class="clinic-name">ALMAJYD DISPENSARY</div>
                 <div class="clinic-address">TOMONDO - ZANZIBAR</div>
                 <div class="clinic-address">Tel: +255 777 123 456</div>
-                <div class="clinic-address">Email: info@almajyddispensary.com</div>
+                <div class="clinic-address">Email: amrykassim@gmail.com</div>
                 <div class="document-title">MEDICAL EXAMINATION REPORT</div>
             </div>
             
@@ -518,7 +519,7 @@ $lab_tests = $lab_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
                 <p>• Keep this report for your medical records</p>
                 <p>• Follow up as recommended by your doctor</p>
                 <p>• In case of emergency, visit the nearest healthcare facility</p>
-                <p>• For inquiries, contact: +255 777 123 456</p>
+                <p>• For inquiries, contact: +255 777 567 478</p>
             </div>
         </div>
     </div>

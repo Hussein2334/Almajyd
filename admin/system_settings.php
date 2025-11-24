@@ -113,6 +113,7 @@ $last_update = isset($user['updated_at']) && !empty($user['updated_at']) ?
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Settings - Almajyd Dispensary</title>
+     <link rel="icon" href="../images/logo.jpg">
     <style>
         * { 
             margin: 0; 

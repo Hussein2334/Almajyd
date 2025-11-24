@@ -419,6 +419,7 @@ $lab_tests_history = $lab_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
             }
         }
     </style>
+     <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
     <div class="container">

@@ -173,6 +173,7 @@ $growth_stats = $pdo->query($growth_stats_query)->fetchAll(PDO::FETCH_ASSOC);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>System Reports - Almajyd Dispensary</title>
+     <link rel="icon" href="../images/logo.jpg">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -1457,7 +1458,7 @@ $growth_stats = $pdo->query($growth_stats_query)->fetchAll(PDO::FETCH_ASSOC);
                     <h1>ALMAJYD DISPENSARY</h1>
                     <div class="clinic-info">
                         TEL: +255 777 567 478 / +255 719 053 764<br>
-                        EMAIL: annykassim@gmail.com<br>
+                        EMAIL: amrykassim@gmail.com<br>
                         TOMONDO - ZANZIBAR
                     </div>
                 </div>

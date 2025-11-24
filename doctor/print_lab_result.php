@@ -422,6 +422,7 @@ $recent_tests = $recent_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
             border-bottom: none;
         }
     </style>
+     <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
     <div class="action-buttons no-print">
@@ -449,7 +450,7 @@ $recent_tests = $recent_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
             <div class="clinic-info">
                 <div class="clinic-name">ALMAJYD DISPENSARY</div>
                 <div class="clinic-address">TOMONDO - ZANZIBAR</div>
-                <div class="clinic-address">Tel: +255 777 123 456</div>
+                <div class="clinic-address">Tel: +255 777 567 478</div>
                 <div class="clinic-address">LABORATORY DEPARTMENT</div>
                 <div class="document-title">LABORATORY TEST REPORT</div>
             </div>
@@ -667,7 +668,7 @@ $recent_tests = $recent_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
                 <p>• Results are valid only for the specimen tested</p>
                 <p>• Clinical correlation is recommended for proper interpretation</p>
                 <p>• Keep this report for your medical records</p>
-                <p>• For inquiries, contact Laboratory: +255 777 123 456</p>
+                <p>• For inquiries, contact Laboratory: +255 777 567 478</p>
             </div>
         </div>
     </div>

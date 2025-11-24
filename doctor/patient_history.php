@@ -487,6 +487,7 @@ $today_checkups = array_filter($checkups, function($c) {
             }
         }
     </style>
+ <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
     <div class="container">

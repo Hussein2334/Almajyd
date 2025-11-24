@@ -390,6 +390,7 @@ $invoice_number = 'INV-' . str_pad($payment_id, 6, '0', STR_PAD_LEFT);
             transform: translateY(-2px);
         }
     </style>
+     <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
     <!-- Print Button -->
@@ -554,7 +555,7 @@ $invoice_number = 'INV-' . str_pad($payment_id, 6, '0', STR_PAD_LEFT);
                 <p><strong>Important Notes:</strong></p>
                 <p>• This invoice is computer generated and requires no physical signature</p>
                 <p>• Please keep this invoice for your records</p>
-                <p>• For any queries, contact us at +255 123 456 789</p>
+                <p>• For any queries, contact us at +255 777 567 478</p>
                 <p>• Office hours: Monday - Saturday, 8:00 AM - 6:00 PM</p>
             </div>
         </div>

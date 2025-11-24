@@ -245,6 +245,7 @@ if (isset($_POST['update_checkup'])) {
             }
         }
     </style>
+     <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
     <div class="container">

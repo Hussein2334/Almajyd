@@ -101,6 +101,7 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Patients - Almajyd Dispensary</title>
+     <link rel="icon" href="../images/logo.jpg">
     <style>
         * { 
             margin: 0; 
@@ -1159,7 +1160,7 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
                     <h1>ALMAJYD DISPENSARY</h1>
                     <div class="clinic-info">
                         TEL: +255 777 567 478 / +255 719 053 764<br>
-                        EMAIL: annykassim@gmail.com<br>
+                        EMAIL: amrykassim@gmail.com<br>
                         TOMONDO - ZANZIBAR
                     </div>
                 </div>
