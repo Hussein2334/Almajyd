@@ -31,6 +31,29 @@ if (isset($_POST['update_test_results'])) {
     }
 }
 
+// Handle Update Multiple Test Results
+if (isset($_POST['update_multiple_results'])) {
+    $test_ids = $_POST['test_ids'];
+    $results = $_POST['results'];
+    
+    try {
+        $pdo->beginTransaction();
+        
+        foreach ($test_ids as $test_id) {
+            if (!empty($test_id)) {
+                $stmt = $pdo->prepare("UPDATE laboratory_tests SET results = ?, status = 'completed', updated_at = NOW() WHERE id = ?");
+                $stmt->execute([$results, $test_id]);
+            }
+        }
+        
+        $pdo->commit();
+        $success_message = "All test results updated successfully!";
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        $error_message = "Error updating test results: " . $e->getMessage();
+    }
+}
+
 // Handle Edit Test Results
 if (isset($_POST['edit_test_results'])) {
     $test_id = $_POST['test_id'];
@@ -111,15 +134,29 @@ $pending_tests = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests WHE
 $completed_tests = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests WHERE status = 'completed'")->fetch(PDO::FETCH_ASSOC)['total'];
 $my_tests = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests WHERE conducted_by = " . $_SESSION['user_id'])->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Get all pending tests
-$pending_tests_list = $pdo->query("SELECT lt.*, p.full_name as patient_name, p.card_no, p.age, p.gender, 
-                                  u.full_name as doctor_name, cf.symptoms, cf.diagnosis
-                           FROM laboratory_tests lt 
-                           JOIN checking_forms cf ON lt.checking_form_id = cf.id 
-                           JOIN patients p ON cf.patient_id = p.id 
-                           JOIN users u ON cf.doctor_id = u.id 
-                           WHERE lt.status = 'pending'
-                           ORDER BY lt.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+// Get all pending tests GROUPED BY PATIENT
+$pending_tests_grouped = $pdo->query("SELECT 
+    p.id as patient_id,
+    p.full_name as patient_name,
+    p.card_no,
+    p.age,
+    p.gender,
+    cf.id as checking_form_id,
+    COUNT(lt.id) as test_count,
+    GROUP_CONCAT(lt.test_type SEPARATOR '|') as test_types,
+    GROUP_CONCAT(lt.id SEPARATOR '|') as test_ids,
+    GROUP_CONCAT(lt.test_description SEPARATOR '|') as test_descriptions,
+    MAX(lt.created_at) as latest_request,
+    u.full_name as doctor_name,
+    cf.symptoms,
+    cf.diagnosis
+FROM patients p
+JOIN checking_forms cf ON p.id = cf.patient_id
+JOIN laboratory_tests lt ON cf.id = lt.checking_form_id
+JOIN users u ON cf.doctor_id = u.id
+WHERE lt.status = 'pending'
+GROUP BY p.id, cf.id
+ORDER BY latest_request DESC")->fetchAll(PDO::FETCH_ASSOC);
 
 // Get ALL completed tests (not just by this lab tech)
 $all_completed_tests = $pdo->query("SELECT lt.*, p.full_name as patient_name, p.card_no, 
@@ -568,86 +605,141 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             transform: translateY(-2px);
         }
 
-        /* Test Cards */
-        .tests-grid {
+        /* Patient Test Cards - NEW STYLES */
+        .patient-cards-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
             gap: 20px;
             margin-top: 20px;
         }
         
-        .test-card {
+        .patient-card {
             background: white;
-            padding: 20px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-            border-left: 4px solid;
+            border-left: 4px solid #f59e0b;
             transition: all 0.3s ease;
+            overflow: hidden;
         }
         
-        .test-card:hover {
+        .patient-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 8px 25px rgba(0,0,0,0.12);
         }
         
-        .test-card.pending { border-left-color: #f59e0b; }
-        .test-card.completed { border-left-color: #10b981; }
-        
-        .test-header {
+        .patient-header {
+            background: linear-gradient(135deg, #fef3c7, #f59e0b);
+            padding: 20px;
+            color: #92400e;
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
+            align-items: center;
         }
         
-        .test-type {
-            font-weight: bold;
-            color: #1e293b;
-            font-size: 1.1rem;
+        .patient-info h4 {
+            margin: 0 0 5px 0;
+            font-size: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        .test-status {
-            padding: 4px 12px;
+        .patient-info p {
+            margin: 0;
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .test-count-badge {
+            background: #92400e;
+            color: white;
+            padding: 8px 12px;
             border-radius: 20px;
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             font-weight: 600;
-            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
         
-        .status-pending { background: #fef3c7; color: #92400e; }
-        .status-completed { background: #d1fae5; color: #065f46; }
-        
-        .test-info {
-            margin-bottom: 15px;
+        .patient-details {
+            padding: 15px 20px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
         }
         
-        .info-row {
+        .detail-row {
             display: flex;
             justify-content: space-between;
             margin-bottom: 8px;
             font-size: 0.9rem;
         }
         
-        .info-label {
+        .detail-label {
             color: #64748b;
             font-weight: 500;
         }
         
-        .info-value {
+        .detail-value {
             color: #1e293b;
             font-weight: 600;
         }
         
-        .test-description {
-            background: #f8fafc;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 0.9rem;
-            color: #475569;
+        .tests-list {
+            padding: 20px;
         }
         
-        .test-actions {
+        .test-item {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 3px solid #8b5cf6;
+        }
+        
+        .test-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .test-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .test-type {
+            font-weight: 600;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .test-status {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .test-description {
+            color: #64748b;
+            font-size: 0.85rem;
+            margin-bottom: 10px;
+        }
+        
+        .test-results-form {
+            margin-top: 10px;
+        }
+        
+        .patient-actions {
+            padding: 15px 20px;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
@@ -876,11 +968,11 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 grid-template-columns: 1fr;
             }
             
-            .tests-grid {
+            .patient-cards-grid {
                 grid-template-columns: 1fr;
             }
             
-            .test-actions {
+            .patient-actions {
                 flex-direction: column;
             }
             
@@ -1022,77 +1114,113 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 </button>
             </div>
 
-            <!-- Pending Tests Tab -->
+            <!-- Pending Tests Tab - GROUPED BY PATIENT -->
             <div id="pending-tab" class="tab-content active">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
                     <i class="fas fa-clock"></i> Pending Laboratory Tests
+                    <span class="badge badge-warning" style="margin-left: 10px;"><?php echo $pending_tests; ?> total tests</span>
                 </h3>
                 
-                <?php if (empty($pending_tests_list)): ?>
+                <?php if (empty($pending_tests_grouped)): ?>
                     <div style="text-align: center; padding: 40px; color: #64748b;">
                         <i class="fas fa-check-circle" style="font-size: 3em; margin-bottom: 15px; color: #10b981;"></i>
                         <h4>No Pending Tests</h4>
                         <p>All laboratory tests have been completed.</p>
                     </div>
                 <?php else: ?>
-                    <div class="tests-grid">
-                        <?php foreach ($pending_tests_list as $test): ?>
-                        <div class="test-card pending">
-                            <div class="test-header">
-                                <div class="test-type"><?php echo htmlspecialchars($test['test_type']); ?></div>
-                                <div class="test-status status-pending">Pending</div>
-                            </div>
-                            
-                            <div class="test-info">
-                                <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($test['patient_name']); ?></span>
+                    <div class="patient-cards-grid">
+                        <?php foreach ($pending_tests_grouped as $patient_group): 
+                            $test_types = explode('|', $patient_group['test_types']);
+                            $test_ids = explode('|', $patient_group['test_ids']);
+                            $test_descriptions = explode('|', $patient_group['test_descriptions']);
+                        ?>
+                        <div class="patient-card">
+                            <!-- Patient Header -->
+                            <div class="patient-header">
+                                <div class="patient-info">
+                                    <h4>
+                                        <i class="fas fa-user-injured"></i>
+                                        <?php echo htmlspecialchars($patient_group['patient_name']); ?>
+                                    </h4>
+                                    <p>Card No: <?php echo htmlspecialchars($patient_group['card_no']); ?></p>
                                 </div>
-                                <div class="info-row">
-                                    <span class="info-label">Card No:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($test['card_no']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Age/Gender:</span>
-                                    <span class="info-value"><?php echo $test['age'] . ' yrs / ' . ucfirst($test['gender']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Requested by:</span>
-                                    <span class="info-value">Dr. <?php echo htmlspecialchars($test['doctor_name']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Request Date:</span>
-                                    <span class="info-value"><?php echo date('M j, Y H:i', strtotime($test['created_at'])); ?></span>
+                                <div class="test-count-badge">
+                                    <i class="fas fa-vial"></i>
+                                    <?php echo $patient_group['test_count']; ?> Tests
                                 </div>
                             </div>
                             
-                            <?php if (!empty($test['test_description'])): ?>
-                            <div class="test-description">
-                                <strong>Test Description:</strong><br>
-                                <?php echo htmlspecialchars($test['test_description']); ?>
-                            </div>
-                            <?php endif; ?>
-                            
-                            <?php if (!empty($test['symptoms'])): ?>
-                            <div class="test-description">
-                                <strong>Patient Symptoms:</strong><br>
-                                <?php echo htmlspecialchars($test['symptoms']); ?>
-                            </div>
-                            <?php endif; ?>
-                            
-                            <form method="POST" action="">
-                                <input type="hidden" name="test_id" value="<?php echo $test['id']; ?>">
-                                <div class="form-group">
-                                    <label class="form-label">Test Results *</label>
-                                    <textarea name="results" class="form-textarea" placeholder="Enter test results and findings..." required></textarea>
+                            <!-- Patient Details -->
+                            <div class="patient-details">
+                                <div class="detail-row">
+                                    <span class="detail-label">Age/Gender:</span>
+                                    <span class="detail-value"><?php echo $patient_group['age'] . ' yrs / ' . ucfirst($patient_group['gender']); ?></span>
                                 </div>
-                                
-                                <div class="test-actions">
-                                    <button type="submit" name="update_test_results" class="btn btn-success">
-                                        <i class="fas fa-check"></i> Submit Results
+                                <div class="detail-row">
+                                    <span class="detail-label">Requested by:</span>
+                                    <span class="detail-value">Dr. <?php echo htmlspecialchars($patient_group['doctor_name']); ?></span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Request Date:</span>
+                                    <span class="detail-value"><?php echo date('M j, Y H:i', strtotime($patient_group['latest_request'])); ?></span>
+                                </div>
+                            </div>
+                            
+                            <!-- Tests List -->
+                            <div class="tests-list">
+                                <?php foreach ($test_types as $index => $test_type): ?>
+                                <div class="test-item">
+                                    <div class="test-item-header">
+                                        <div class="test-type">
+                                            <i class="fas fa-microscope"></i>
+                                            <?php echo htmlspecialchars($test_type); ?>
+                                        </div>
+                                        <div class="test-status">Pending</div>
+                                    </div>
+                                    
+                                    <?php if (!empty($test_descriptions[$index])): ?>
+                                    <div class="test-description">
+                                        <?php echo htmlspecialchars($test_descriptions[$index]); ?>
+                                    </div>
+                                    <?php endif; ?>
+                                    
+                                    <!-- Individual Test Results Form -->
+                                    <form method="POST" action="" class="test-results-form">
+                                        <input type="hidden" name="test_id" value="<?php echo $test_ids[$index]; ?>">
+                                        <div class="form-group" style="margin-bottom: 10px;">
+                                            <label class="form-label" style="font-size: 0.8rem;">Test Results for <?php echo htmlspecialchars($test_type); ?>:</label>
+                                            <textarea name="results" class="form-textarea" placeholder="Enter test results and findings..." required style="min-height: 80px; font-size: 0.8rem;"></textarea>
+                                        </div>
+                                        
+                                        <div class="action-buttons">
+                                            <button type="submit" name="update_test_results" class="btn btn-success btn-sm">
+                                                <i class="fas fa-check"></i> Submit Results
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                            
+                            <!-- Bulk Actions -->
+                            <div class="patient-actions">
+                                <form method="POST" action="" style="width: 100%;">
+                                    <?php foreach ($test_ids as $test_id): ?>
+                                        <input type="hidden" name="test_ids[]" value="<?php echo $test_id; ?>">
+                                    <?php endforeach; ?>
+                                    
+                                    <div class="form-group" style="margin-bottom: 15px;">
+                                        <label class="form-label" style="font-size: 0.9rem;">
+                                            <i class="fas fa-bolt"></i> Quick Results for All Tests:
+                                        </label>
+                                        <textarea name="results" class="form-textarea" placeholder="Enter results that apply to all tests..." style="min-height: 80px;"></textarea>
+                                    </div>
+                                    
+                                    <button type="submit" name="update_multiple_results" class="btn btn-primary" style="width: 100%;">
+                                        <i class="fas fa-check-double"></i> Submit Results for All Tests
                                     </button>
-                                </div>
-                            </form>
+                                </form>
+                            </div>
                         </div>
                         <?php endforeach; ?>
                     </div>

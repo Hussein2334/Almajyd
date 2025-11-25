@@ -61,20 +61,226 @@ if (isset($_POST['update_profile'])) {
     }
 }
 
-// Handle Dispense Prescription - FIXED: Removed updated_at column
-if (isset($_POST['dispense_prescription'])) {
-    $prescription_id = $_POST['prescription_id'];
+// Handle Add New Prescription by Doctor
+if (isset($_POST['add_prescription'])) {
+    $patient_id = $_POST['patient_id'];
+    $medicine_name = $_POST['medicine_name'];
+    $dosage = $_POST['dosage'];
+    $frequency = $_POST['frequency'];
+    $duration = $_POST['duration'];
+    $instructions = $_POST['instructions'] ?? '';
     
     try {
-        $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'dispensed' WHERE id = ?");
-        $stmt->execute([$prescription_id]);
-        $success_message = "Prescription marked as dispensed successfully!";
+        // Get checking_form_id for the patient
+        $checking_stmt = $pdo->prepare("SELECT id FROM checking_forms WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1");
+        $checking_stmt->execute([$patient_id]);
+        $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
         
-        // Refresh page to update status
-        header("Location: ".$_SERVER['PHP_SELF']);
-        exit;
+        if ($checking_form) {
+            $checking_form_id = $checking_form['id'];
+            
+            // Insert new prescription
+            $stmt = $pdo->prepare("INSERT INTO prescriptions (checking_form_id, medicine_name, dosage, frequency, duration, instructions, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')");
+            $stmt->execute([$checking_form_id, $medicine_name, $dosage, $frequency, $duration, $instructions]);
+            
+            $success_message = "Prescription added successfully!";
+        } else {
+            $error_message = "No checking form found for this patient!";
+        }
     } catch (PDOException $e) {
-        $error_message = "Error dispensing prescription: " . $e->getMessage();
+        $error_message = "Error adding prescription: " . $e->getMessage();
+    }
+}
+
+// Handle Dispense All Prescriptions AND Lab Tests with Prices for a Patient
+if (isset($_POST['dispense_all_prescriptions'])) {
+    $patient_id = $_POST['patient_id'];
+    $prescriptions_data = $_POST['prescriptions'] ?? [];
+    $lab_tests_data = $_POST['lab_tests'] ?? [];
+    $total_amount = 0;
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // Get checking_form_id for the patient
+        $checking_stmt = $pdo->prepare("SELECT id FROM checking_forms WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1");
+        $checking_stmt->execute([$patient_id]);
+        $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($checking_form) {
+            $checking_form_id = $checking_form['id'];
+            
+            // Process each prescription
+            foreach ($prescriptions_data as $prescription_id => $data) {
+                $medicine_available = $data['available'] ?? 'no';
+                $price = floatval($data['price'] ?? 0);
+                
+                if ($medicine_available === 'yes') {
+                    // Update prescription status to dispensed
+                    $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'dispensed' WHERE id = ?");
+                    $stmt->execute([$prescription_id]);
+                    
+                    // Add to total amount
+                    $total_amount += $price;
+                } else {
+                    // Mark as not available
+                    $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'not_available' WHERE id = ?");
+                    $stmt->execute([$prescription_id]);
+                }
+            }
+            
+            // Process each lab test
+            foreach ($lab_tests_data as $lab_test_id => $data) {
+                $lab_test_price = floatval($data['price'] ?? 0);
+                
+                if ($lab_test_price > 0) {
+                    // Add lab test price to total amount
+                    $total_amount += $lab_test_price;
+                }
+            }
+            
+            // Create or update payment record with total medicine AND lab tests price
+            if ($total_amount > 0) {
+                $payment_stmt = $pdo->prepare("
+                    INSERT INTO payments (patient_id, checking_form_id, amount, payment_type, status, processed_by) 
+                    VALUES (?, ?, ?, 'medicine_and_lab', 'pending', ?)
+                    ON DUPLICATE KEY UPDATE amount = amount + ?, processed_by = ?
+                ");
+                $payment_stmt->execute([
+                    $patient_id, 
+                    $checking_form_id, 
+                    $total_amount, 
+                    $_SESSION['user_id'],
+                    $total_amount,
+                    $_SESSION['user_id']
+                ]);
+            }
+            
+            $success_message = "Prescriptions and lab tests processed successfully! Total amount: TSh " . number_format($total_amount, 2);
+        } else {
+            $error_message = "No checking form found for this patient!";
+        }
+        
+        $pdo->commit();
+        
+        // Refresh page to update status but maintain scroll position
+        echo "<script>
+            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
+            window.location.href = window.location.href.split('?')[0];
+        </script>";
+        exit;
+        
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        $error_message = "Error processing prescriptions and lab tests: " . $e->getMessage();
+    }
+}
+
+// Handle Edit Total Price (for completed prescriptions and lab tests)
+if (isset($_POST['edit_total_price'])) {
+    $patient_id = $_POST['patient_id'];
+    $new_price = $_POST['new_price'];
+    $reason = $_POST['reason'] ?? '';
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // Get checking_form_id for the patient
+        $checking_stmt = $pdo->prepare("SELECT id FROM checking_forms WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1");
+        $checking_stmt->execute([$patient_id]);
+        $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($checking_form) {
+            $checking_form_id = $checking_form['id'];
+            
+            // Check if payment record exists
+            $check_payment_stmt = $pdo->prepare("
+                SELECT id FROM payments 
+                WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'
+            ");
+            $check_payment_stmt->execute([$patient_id, $checking_form_id]);
+            $existing_payment = $check_payment_stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($existing_payment) {
+                // Update existing payment amount
+                $payment_stmt = $pdo->prepare("
+                    UPDATE payments 
+                    SET amount = ?
+                    WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'
+                ");
+                $payment_stmt->execute([$new_price, $patient_id, $checking_form_id]);
+            } else {
+                // Create new payment record
+                $payment_stmt = $pdo->prepare("
+                    INSERT INTO payments (patient_id, checking_form_id, amount, payment_type, status, processed_by) 
+                    VALUES (?, ?, ?, 'medicine_and_lab', 'pending', ?)
+                ");
+                $payment_stmt->execute([
+                    $patient_id, 
+                    $checking_form_id, 
+                    $new_price, 
+                    $_SESSION['user_id']
+                ]);
+            }
+            
+            $success_message = "Total price updated successfully to TSh " . number_format($new_price, 2);
+        }
+        
+        $pdo->commit();
+        
+        // Refresh page but maintain position
+        echo "<script>
+            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
+            window.location.href = window.location.href.split('?')[0];
+        </script>";
+        exit;
+        
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        $error_message = "Error updating total price: " . $e->getMessage();
+    }
+}
+
+// Handle Delete Patient Card from Dispensed Section
+if (isset($_POST['delete_dispensed_card'])) {
+    $patient_id = $_POST['patient_id'];
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // Get checking_form_id for the patient
+        $checking_stmt = $pdo->prepare("SELECT id FROM checking_forms WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1");
+        $checking_stmt->execute([$patient_id]);
+        $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($checking_form) {
+            $checking_form_id = $checking_form['id'];
+            
+            // Change prescription status back to pending (so it appears in pending section again)
+            $update_stmt = $pdo->prepare("UPDATE prescriptions SET status = 'pending' WHERE checking_form_id = ? AND status = 'dispensed'");
+            $update_stmt->execute([$checking_form_id]);
+            
+            // Delete the payment record for medicine_and_lab
+            $delete_stmt = $pdo->prepare("DELETE FROM payments WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'");
+            $delete_stmt->execute([$patient_id, $checking_form_id]);
+            
+            $success_message = "Patient card removed from dispensed section successfully!";
+        } else {
+            $error_message = "No checking form found for this patient!";
+        }
+        
+        $pdo->commit();
+        
+        // Refresh page but maintain position
+        echo "<script>
+            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
+            window.location.href = window.location.href.split('?')[0];
+        </script>";
+        exit;
+        
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        $error_message = "Error deleting patient card: " . $e->getMessage();
     }
 }
 
@@ -85,39 +291,69 @@ $total_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions"
 $pending_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE status = 'pending'")->fetch(PDO::FETCH_ASSOC)['total'];
 $completed_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE status = 'dispensed'")->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Get pending prescriptions with patient and doctor details
-$pending_prescriptions_list = $pdo->query("SELECT 
-    pr.*, 
+// Get pending prescriptions grouped by patient WITH LAB RESULTS AND PRICES
+$pending_patients = $pdo->query("SELECT 
+    p.id as patient_id,
     p.full_name as patient_name, 
     p.card_no, 
     p.age, 
     p.gender,
-    u.full_name as doctor_name, 
+    u.full_name as doctor_name,
     cf.diagnosis,
-    cf.symptoms
-FROM prescriptions pr 
-JOIN checking_forms cf ON pr.checking_form_id = cf.id 
-JOIN patients p ON cf.patient_id = p.id 
+    cf.symptoms,
+    COUNT(pr.id) as prescription_count,
+    GROUP_CONCAT(CONCAT(pr.medicine_name, '|', pr.dosage, '|', pr.frequency, '|', pr.duration, '|', pr.instructions, '|', pr.id) SEPARATOR ';;') as prescriptions_data,
+    (SELECT GROUP_CONCAT(CONCAT(lt.test_type, '|', lt.results, '|', lt.id) SEPARATOR ';;') 
+     FROM laboratory_tests lt 
+     WHERE lt.checking_form_id = cf.id AND lt.status = 'completed') as lab_results
+FROM patients p 
+JOIN checking_forms cf ON p.id = cf.patient_id 
+JOIN prescriptions pr ON cf.id = pr.checking_form_id 
 JOIN users u ON cf.doctor_id = u.id 
 WHERE pr.status = 'pending'
-ORDER BY pr.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender, u.full_name, cf.diagnosis, cf.symptoms
+ORDER BY MAX(pr.created_at) DESC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get completed prescriptions
-$completed_prescriptions_list = $pdo->query("SELECT 
-    pr.*, 
+// Get completed prescriptions grouped by patient WITH LAB RESULTS AND PRICES
+$completed_patients = $pdo->query("SELECT 
+    p.id as patient_id,
     p.full_name as patient_name, 
     p.card_no, 
     p.age, 
     p.gender,
-    u.full_name as doctor_name, 
-    cf.diagnosis
-FROM prescriptions pr 
-JOIN checking_forms cf ON pr.checking_form_id = cf.id 
-JOIN patients p ON cf.patient_id = p.id 
+    u.full_name as doctor_name,
+    cf.diagnosis,
+    cf.id as checking_form_id,
+    COUNT(pr.id) as prescription_count,
+    GROUP_CONCAT(CONCAT(pr.medicine_name, '|', pr.dosage, '|', pr.frequency, '|', pr.duration, '|', pr.instructions, '|', pr.id) SEPARATOR ';;') as prescriptions_data,
+    (SELECT GROUP_CONCAT(CONCAT(lt.test_type, '|', lt.results, '|', lt.id) SEPARATOR ';;') 
+     FROM laboratory_tests lt 
+     WHERE lt.checking_form_id = cf.id AND lt.status = 'completed') as lab_results
+FROM patients p 
+JOIN checking_forms cf ON p.id = cf.patient_id 
+JOIN prescriptions pr ON cf.id = pr.checking_form_id 
 JOIN users u ON cf.doctor_id = u.id 
 WHERE pr.status = 'dispensed'
-ORDER BY pr.created_at DESC 
+GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender, u.full_name, cf.diagnosis, cf.id
+ORDER BY MAX(pr.created_at) DESC 
 LIMIT 20")->fetchAll(PDO::FETCH_ASSOC);
+
+// Get total amounts from payments for dispensed prescriptions AND lab tests
+$payment_amounts = [];
+$payment_details = [];
+$payment_stmt = $pdo->query("
+    SELECT patient_id, checking_form_id, SUM(amount) as total_amount, id as payment_id
+    FROM payments 
+    WHERE payment_type = 'medicine_and_lab' AND status = 'pending'
+    GROUP BY patient_id, checking_form_id, id
+");
+foreach ($payment_stmt->fetchAll(PDO::FETCH_ASSOC) as $payment) {
+    $payment_amounts[$payment['patient_id']] = $payment['total_amount'];
+    $payment_details[$payment['patient_id']] = $payment;
+}
+
+// Get patients for dropdown in add prescription form
+$patients = $pdo->query("SELECT id, full_name, card_no FROM patients ORDER BY full_name")->fetchAll(PDO::FETCH_ASSOC);
 
 // Get recent patients with prescriptions
 $recent_patients = $pdo->query("SELECT DISTINCT p.*, 
@@ -128,24 +364,21 @@ FROM patients p
 ORDER BY p.created_at DESC 
 LIMIT 10")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get laboratory results
-$lab_results = $pdo->query("SELECT 
-    lt.*, 
+// Get laboratory results grouped by patient
+$lab_results_by_patient = $pdo->query("SELECT 
+    p.id as patient_id,
     p.full_name as patient_name, 
     p.card_no, 
     p.age, 
     p.gender,
-    u.full_name as doctor_name, 
-    lab_user.full_name as lab_technician,
-    cf.diagnosis, 
-    cf.symptoms
-FROM laboratory_tests lt 
-JOIN checking_forms cf ON lt.checking_form_id = cf.id 
-JOIN patients p ON cf.patient_id = p.id 
-JOIN users u ON cf.doctor_id = u.id 
-LEFT JOIN users lab_user ON lt.conducted_by = lab_user.id
+    GROUP_CONCAT(CONCAT(lt.test_type, ': ', lt.results) SEPARATOR ' | ') as all_tests,
+    COUNT(lt.id) as test_count
+FROM patients p 
+JOIN checking_forms cf ON p.id = cf.patient_id 
+JOIN laboratory_tests lt ON cf.id = lt.checking_form_id 
 WHERE lt.status = 'completed'
-ORDER BY lt.updated_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender
+ORDER BY MAX(lt.updated_at) DESC")->fetchAll(PDO::FETCH_ASSOC);
 
 // Get current user data
 $user_stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
@@ -521,16 +754,16 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         }
         
         .btn {
-            padding: 8px 16px;
+            padding: 12px 20px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             text-decoration: none;
-            font-weight: 500;
-            font-size: 0.85rem;
+            font-weight: 600;
+            font-size: 0.9rem;
             transition: all 0.3s ease;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             cursor: pointer;
         }
         
@@ -587,18 +820,19 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         /* Cards Grid */
         .cards-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(700px, 1fr));
+            gap: 25px;
             margin-top: 20px;
         }
         
         .card {
             background: white;
-            padding: 20px;
+            padding: 25px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
             border-left: 4px solid;
             transition: all 0.3s ease;
+            position: relative;
         }
         
         .card:hover {
@@ -607,6 +841,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         }
         
         .card.prescription { border-left-color: #f59e0b; }
+        .card.dispensed { border-left-color: #10b981; }
         .card.lab-result { border-left-color: #8b5cf6; }
         .card.patient { border-left-color: #3b82f6; }
         
@@ -614,19 +849,19 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
         
         .card-title {
             font-weight: bold;
             color: #1e293b;
-            font-size: 1.1rem;
+            font-size: 1.2rem;
         }
         
         .card-status {
-            padding: 4px 12px;
+            padding: 6px 15px;
             border-radius: 20px;
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             font-weight: 600;
             text-transform: uppercase;
         }
@@ -636,14 +871,14 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         .status-dispensed { background: #dbeafe; color: #1e40af; }
         
         .card-info {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
         
         .info-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
+            margin-bottom: 10px;
+            font-size: 0.95rem;
         }
         
         .info-label {
@@ -658,17 +893,256 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         
         .card-description {
             background: #f8fafc;
-            padding: 12px;
+            padding: 15px;
             border-radius: 8px;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
             font-size: 0.9rem;
             color: #475569;
+            line-height: 1.5;
+        }
+        
+        .medications-list {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .medication-item {
+            padding: 15px;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 15px;
+        }
+        
+        .medication-item:last-child {
+            border-bottom: none;
+        }
+        
+        .medication-details {
+            flex: 1;
+        }
+        
+        .medication-name {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 8px;
+            font-size: 1rem;
+        }
+        
+        .medication-specs {
+            font-size: 0.85rem;
+            color: #64748b;
+            line-height: 1.4;
+        }
+        
+        .medication-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 200px;
         }
         
         .card-actions {
             display: flex;
-            gap: 10px;
+            gap: 12px;
             flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        /* Delete Button */
+        .delete-card-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 35px;
+            height: 35px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+        
+        .delete-card-btn:hover {
+            background: #dc2626;
+            transform: scale(1.1);
+        }
+
+        /* Lab Results Section */
+        .lab-results-section {
+            background: #f0f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .lab-results-section h5 {
+            color: #1e40af;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1rem;
+        }
+        
+        .lab-test-item {
+            padding: 15px;
+            background: white;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border-left: 3px solid #3b82f6;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 15px;
+        }
+        
+        .lab-test-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .test-details {
+            flex: 1;
+        }
+        
+        .test-type {
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 5px;
+        }
+        
+        .test-results {
+            color: #475569;
+            font-size: 0.9rem;
+        }
+        
+        .test-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 200px;
+        }
+
+        /* Dispense All Form */
+        .dispense-all-form {
+            background: #f1f5f9;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            border-left: 4px solid #10b981;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .price-input {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .price-input span {
+            font-weight: 600;
+            color: #059669;
+            font-size: 0.9rem;
+        }
+        
+        .availability-toggle {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .toggle-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .toggle-option input[type="radio"] {
+            margin: 0;
+        }
+        
+        .toggle-option label {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .total-amount {
+            background: #d1fae5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #065f46;
+            border: 2px solid #10b981;
+        }
+
+        /* Add Prescription Form */
+        .add-prescription-form {
+            background: #f8fafc;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 25px;
+            border-left: 4px solid #10b981;
+        }
+        
+        .prescription-form-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 15px;
+            align-items: end;
+        }
+        
+        @media (max-width: 768px) {
+            .prescription-form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Edit Price Form */
+        .edit-price-form {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            border-left: 3px solid #ffc107;
+        }
+        
+        .price-display {
+            font-weight: bold;
+            color: #059669;
+            font-size: 1.1rem;
+        }
+        
+        .edit-price-btn {
+            background: none;
+            border: none;
+            color: #3b82f6;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-left: 8px;
+        }
+        
+        .edit-price-btn:hover {
+            color: #1d4ed8;
+            text-decoration: underline;
         }
 
         /* Tables */
@@ -694,14 +1168,14 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         /* Action Buttons */
         .action-buttons {
             display: flex;
-            gap: 5px;
+            gap: 8px;
             flex-wrap: wrap;
         }
         
         .btn-sm {
-            padding: 4px 8px;
-            font-size: 0.75rem;
-            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            border-radius: 6px;
         }
 
         /* DataTables Custom Styling */
@@ -752,9 +1226,9 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
 
         /* Badges */
         .badge {
-            padding: 4px 8px;
+            padding: 6px 12px;
             border-radius: 12px;
-            font-size: 0.7rem;
+            font-size: 0.75rem;
             font-weight: 600;
         }
         
@@ -797,6 +1271,60 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             font-size: 0.9rem;
             max-width: 400px;
             margin: 0 auto;
+        }
+
+        /* Lab Results Card */
+        .lab-results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .lab-patient-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            border-left: 4px solid #8b5cf6;
+        }
+        
+        .patient-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .patient-name {
+            font-weight: bold;
+            color: #1e293b;
+            font-size: 1.1rem;
+        }
+        
+        .test-count {
+            background: #8b5cf6;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .tests-summary {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+        
+        .test-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .test-item:last-child {
+            border-bottom: none;
         }
 
         /* MOBILE RESPONSIVE DESIGN */
@@ -865,6 +1393,41 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             .action-buttons {
                 flex-direction: column;
             }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .medication-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .medication-actions {
+                width: 100%;
+            }
+            
+            .lab-test-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .test-actions {
+                width: 100%;
+            }
+            
+            .dispense-all-form {
+                padding: 15px;
+            }
+            
+            .delete-card-btn {
+                position: relative;
+                top: auto;
+                right: auto;
+                margin-bottom: 15px;
+            }
         }
         
         @media (max-width: 480px) {
@@ -884,7 +1447,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-     <link rel="icon" href="../images/logo.jpg">
+    <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
 
@@ -985,15 +1548,15 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             <div class="tabs">
                 <button class="tab active" onclick="showTab('prescriptions')">
                     <i class="fas fa-prescription"></i>
-                    Pending Prescriptions (<?php echo $pending_prescriptions; ?>)
+                    Pending Prescriptions (<?php echo count($pending_patients); ?>)
                 </button>
                 <button class="tab" onclick="showTab('dispensed')">
                     <i class="fas fa-check-circle"></i>
-                    Dispensed Prescriptions (<?php echo $completed_prescriptions; ?>)
+                    Dispensed Prescriptions (<?php echo count($completed_patients); ?>)
                 </button>
                 <button class="tab" onclick="showTab('lab-results')">
                     <i class="fas fa-file-medical-alt"></i>
-                    Laboratory Results (<?php echo count($lab_results); ?>)
+                    Laboratory Results (<?php echo count($lab_results_by_patient); ?>)
                 </button>
                 <button class="tab" onclick="showTab('patients')">
                     <i class="fas fa-user-injured"></i>
@@ -1011,7 +1574,58 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                     <i class="fas fa-prescription"></i> Pending Prescriptions - Doctor's Instructions
                 </h3>
                 
-                <?php if (empty($pending_prescriptions_list)): ?>
+                <!-- Add New Prescription Form -->
+                <div class="add-prescription-form">
+                    <h4 style="margin-bottom: 15px; color: #1e293b;">
+                        <i class="fas fa-plus-circle"></i> Add New Prescription
+                    </h4>
+                    <form method="POST" action="">
+                        <div class="prescription-form-row">
+                            <div class="form-group">
+                                <label class="form-label">Patient *</label>
+                                <select name="patient_id" class="form-select" required>
+                                    <option value="">Select Patient</option>
+                                    <?php foreach ($patients as $patient): ?>
+                                    <option value="<?php echo $patient['id']; ?>">
+                                        <?php echo htmlspecialchars($patient['full_name']) . ' (' . htmlspecialchars($patient['card_no']) . ')'; ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Medicine Name *</label>
+                                <input type="text" name="medicine_name" class="form-input" placeholder="e.g., Amoxicillin" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Dosage *</label>
+                                <input type="text" name="dosage" class="form-input" placeholder="e.g., 500mg" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Frequency *</label>
+                                <input type="text" name="frequency" class="form-input" placeholder="e.g., 3 times daily" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Duration *</label>
+                                <input type="text" name="duration" class="form-input" placeholder="e.g., 7 days" required>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Instructions (Optional)</label>
+                            <textarea name="instructions" class="form-textarea" placeholder="Additional instructions..."></textarea>
+                        </div>
+                        
+                        <button type="submit" name="add_prescription" class="btn btn-success">
+                            <i class="fas fa-save"></i> Submit Prescription
+                        </button>
+                    </form>
+                </div>
+                
+                <?php if (empty($pending_patients)): ?>
                     <div class="empty-state">
                         <i class="fas fa-check-circle"></i>
                         <h4>No Pending Prescriptions</h4>
@@ -1019,73 +1633,148 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                     </div>
                 <?php else: ?>
                     <div class="cards-grid">
-                        <?php foreach ($pending_prescriptions_list as $prescription): ?>
+                        <?php foreach ($pending_patients as $patient): ?>
                         <div class="card prescription">
                             <div class="card-header">
-                                <div class="card-title"><?php echo htmlspecialchars($prescription['medicine_name']); ?></div>
-                                <div class="card-status status-pending">Pending</div>
+                                <div class="card-title"><?php echo htmlspecialchars($patient['patient_name']); ?></div>
+                                <div class="card-status status-pending">
+                                    <?php echo $patient['prescription_count']; ?> Meds
+                                </div>
                             </div>
                             
                             <div class="card-info">
                                 <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($prescription['patient_name']); ?></span>
-                                </div>
-                                <div class="info-row">
                                     <span class="info-label">Card No:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($prescription['card_no']); ?></span>
+                                    <span class="info-value"><?php echo htmlspecialchars($patient['card_no']); ?></span>
                                 </div>
                                 <div class="info-row">
                                     <span class="info-label">Age/Gender:</span>
-                                    <span class="info-value"><?php echo $prescription['age'] . ' yrs / ' . ucfirst($prescription['gender']); ?></span>
+                                    <span class="info-value"><?php echo $patient['age'] . ' yrs / ' . ucfirst($patient['gender']); ?></span>
                                 </div>
                                 <div class="info-row">
                                     <span class="info-label">Prescribed by:</span>
-                                    <span class="info-value">Dr. <?php echo htmlspecialchars($prescription['doctor_name']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Prescribed Date:</span>
-                                    <span class="info-value"><?php echo date('M j, Y H:i', strtotime($prescription['created_at'])); ?></span>
+                                    <span class="info-value">Dr. <?php echo htmlspecialchars($patient['doctor_name']); ?></span>
                                 </div>
                             </div>
                             
-                            <div class="card-description">
-                                <strong>Medication Details:</strong><br>
-                                <strong>Dosage:</strong> <?php echo htmlspecialchars($prescription['dosage'] ?? 'Not specified'); ?><br>
-                                <strong>Frequency:</strong> <?php echo htmlspecialchars($prescription['frequency'] ?? 'Not specified'); ?><br>
-                                <strong>Duration:</strong> <?php echo htmlspecialchars($prescription['duration'] ?? 'Not specified'); ?><br>
-                                <?php if (!empty($prescription['instructions'])): ?>
-                                    <strong>Special Instructions:</strong> <?php echo htmlspecialchars($prescription['instructions']); ?>
-                                <?php endif; ?>
-                            </div>
-                            
-                            <?php if (!empty($prescription['diagnosis'])): ?>
+                            <?php if (!empty($patient['diagnosis'])): ?>
                             <div class="card-description">
                                 <strong>Doctor's Diagnosis:</strong><br>
-                                <?php echo htmlspecialchars($prescription['diagnosis']); ?>
+                                <?php echo htmlspecialchars($patient['diagnosis']); ?>
                             </div>
                             <?php endif; ?>
                             
-                            <?php if (!empty($prescription['symptoms'])): ?>
+                            <?php if (!empty($patient['symptoms'])): ?>
                             <div class="card-description">
                                 <strong>Reported Symptoms:</strong><br>
-                                <?php echo htmlspecialchars($prescription['symptoms']); ?>
+                                <?php echo htmlspecialchars($patient['symptoms']); ?>
                             </div>
                             <?php endif; ?>
                             
-                            <div class="card-actions">
-                                <form method="POST" action="" style="display: inline;">
-                                    <input type="hidden" name="prescription_id" value="<?php echo $prescription['id']; ?>">
-                                    <button type="submit" name="dispense_prescription" class="btn btn-success">
-                                        <i class="fas fa-check"></i> Mark as Dispensed
-                                    </button>
+                            <!-- Laboratory Results Section WITH PRICING -->
+                            <?php if (!empty($patient['lab_results'])): ?>
+                            <div class="lab-results-section">
+                                <h5><i class="fas fa-vial"></i> Laboratory Test Results - Set Prices</h5>
+                                <?php 
+                                $lab_tests = explode(';;', $patient['lab_results']);
+                                foreach ($lab_tests as $test):
+                                    $test_data = explode('|', $test);
+                                    if (count($test_data) >= 3):
+                                        $test_type = trim($test_data[0]);
+                                        $test_result = trim($test_data[1]);
+                                        $lab_test_id = trim($test_data[2]);
+                                ?>
+                                <div class="lab-test-item">
+                                    <div class="test-details">
+                                        <div class="test-type"><?php echo htmlspecialchars($test_type); ?></div>
+                                        <div class="test-results"><?php echo htmlspecialchars($test_result); ?></div>
+                                    </div>
+                                    <div class="test-actions">
+                                        <div class="price-input">
+                                            <span>Price (TSh):</span>
+                                            <input type="number" name="lab_tests[<?php echo $lab_test_id; ?>][price]" class="form-input lab-price-input-field" min="0" step="0.01" value="0" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)" style="width: 100px; padding: 8px;">
+                                        </div>
+                                    </div>
+                                </div>
+                                <?php 
+                                    endif;
+                                endforeach; 
+                                ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <!-- Dispense All Form for Patient (INCLUDING LAB TESTS) -->
+                            <div class="dispense-all-form">
+                                <h4 style="margin-bottom: 15px; color: #1e293b;">
+                                    <i class="fas fa-capsules"></i> Dispense All Medications & Lab Tests
+                                </h4>
+                                
+                                <form method="POST" action="" id="dispenseForm_<?php echo $patient['patient_id']; ?>">
+                                    <input type="hidden" name="patient_id" value="<?php echo $patient['patient_id']; ?>">
+                                    
+                                    <div class="medications-list">
+                                        <strong style="display: block; margin-bottom: 15px; color: #1e293b; font-size: 1rem;">Prescribed Medications:</strong>
+                                        <?php 
+                                        $prescriptions = explode(';;', $patient['prescriptions_data']);
+                                        foreach ($prescriptions as $prescription):
+                                            $med_data = explode('|', $prescription);
+                                            if (count($med_data) >= 6):
+                                                $med_name = $med_data[0];
+                                                $dosage = $med_data[1];
+                                                $frequency = $med_data[2];
+                                                $duration = $med_data[3];
+                                                $instructions = $med_data[4];
+                                                $prescription_id = $med_data[5];
+                                        ?>
+                                        <div class="medication-item">
+                                            <div class="medication-details">
+                                                <div class="medication-name"><?php echo htmlspecialchars($med_name); ?></div>
+                                                <div class="medication-specs">
+                                                    <strong>Dosage:</strong> <?php echo htmlspecialchars($dosage); ?> | 
+                                                    <strong>Frequency:</strong> <?php echo htmlspecialchars($frequency); ?> | 
+                                                    <strong>Duration:</strong> <?php echo htmlspecialchars($duration); ?>
+                                                    <?php if (!empty($instructions)): ?>
+                                                    | <strong>Instructions:</strong> <?php echo htmlspecialchars($instructions); ?>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
+                                            <div class="medication-actions">
+                                                <div class="availability-toggle">
+                                                    <div class="toggle-option">
+                                                        <input type="radio" id="available_yes_<?php echo $prescription_id; ?>" name="prescriptions[<?php echo $prescription_id; ?>][available]" value="yes" checked onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)">
+                                                        <label for="available_yes_<?php echo $prescription_id; ?>">Available</label>
+                                                    </div>
+                                                    <div class="toggle-option">
+                                                        <input type="radio" id="available_no_<?php echo $prescription_id; ?>" name="prescriptions[<?php echo $prescription_id; ?>][available]" value="no" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)">
+                                                        <label for="available_no_<?php echo $prescription_id; ?>">Not Available</label>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="price-input">
+                                                    <span>Price (TSh):</span>
+                                                    <input type="number" name="prescriptions[<?php echo $prescription_id; ?>][price]" class="form-input price-input-field" min="0" step="0.01" value="0" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)" style="width: 100px; padding: 8px;">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <?php 
+                                            endif;
+                                        endforeach; 
+                                        ?>
+                                    </div>
+                                    
+                                    <div class="total-amount" id="totalAmount_<?php echo $patient['patient_id']; ?>">
+                                        Total Amount: TSh 0.00
+                                    </div>
+                                    
+                                    <div class="card-actions">
+                                        <button type="submit" name="dispense_all_prescriptions" class="btn btn-success">
+                                            <i class="fas fa-check-circle"></i> Process All (Meds & Lab Tests)
+                                        </button>
+                                        <button type="button" class="btn btn-primary" onclick="printAllPrescriptions(<?php echo $patient['patient_id']; ?>)">
+                                            <i class="fas fa-print"></i> Print All
+                                        </button>
+                                    </div>
                                 </form>
-                                <button class="btn btn-info" onclick="viewPatientLabResults('<?php echo htmlspecialchars($prescription['patient_name']); ?>', <?php echo $prescription['id']; ?>)">
-                                    <i class="fas fa-vial"></i> View Lab Results
-                                </button>
-                                <button class="btn btn-primary" onclick="printPrescription(<?php echo $prescription['id']; ?>)">
-                                    <i class="fas fa-print"></i> Print
-                                </button>
                             </div>
                         </div>
                         <?php endforeach; ?>
@@ -1096,10 +1785,10 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             <!-- Dispensed Prescriptions Tab -->
             <div id="dispensed-tab" class="tab-content">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
-                    <i class="fas fa-check-circle"></i> Dispensed Prescriptions
+                    <i class="fas fa-check-circle"></i> Dispensed Prescriptions & Lab Tests - Edit Total Price
                 </h3>
                 
-                <?php if (empty($completed_prescriptions_list)): ?>
+                <?php if (empty($completed_patients)): ?>
                     <div class="empty-state">
                         <i class="fas fa-prescription-bottle"></i>
                         <h4>No Dispensed Prescriptions</h4>
@@ -1107,46 +1796,159 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                     </div>
                 <?php else: ?>
                     <div class="cards-grid">
-                        <?php foreach ($completed_prescriptions_list as $prescription): ?>
-                        <div class="card prescription">
+                        <?php foreach ($completed_patients as $patient): 
+                            $total_amount = $payment_amounts[$patient['patient_id']] ?? 0;
+                        ?>
+                        <div class="card dispensed">
+                            <!-- Delete Button -->
+                            <form method="POST" action="" style="display: inline;">
+                                <input type="hidden" name="patient_id" value="<?php echo $patient['patient_id']; ?>">
+                                <button type="submit" name="delete_dispensed_card" class="delete-card-btn" title="Remove from dispensed section" onclick="return confirm('Are you sure you want to remove this patient from dispensed section? This will move prescriptions back to pending.')">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </form>
+                            
                             <div class="card-header">
-                                <div class="card-title"><?php echo htmlspecialchars($prescription['medicine_name']); ?></div>
-                                <div class="card-status status-dispensed">Dispensed</div>
+                                <div class="card-title"><?php echo htmlspecialchars($patient['patient_name']); ?></div>
+                                <div class="card-status status-dispensed">
+                                    <?php echo $patient['prescription_count']; ?> Meds
+                                </div>
                             </div>
                             
                             <div class="card-info">
                                 <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($prescription['patient_name']); ?></span>
-                                </div>
-                                <div class="info-row">
                                     <span class="info-label">Card No:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($prescription['card_no']); ?></span>
+                                    <span class="info-value"><?php echo htmlspecialchars($patient['card_no']); ?></span>
                                 </div>
                                 <div class="info-row">
                                     <span class="info-label">Age/Gender:</span>
-                                    <span class="info-value"><?php echo $prescription['age'] . ' yrs / ' . ucfirst($prescription['gender']); ?></span>
+                                    <span class="info-value"><?php echo $patient['age'] . ' yrs / ' . ucfirst($patient['gender']); ?></span>
                                 </div>
                                 <div class="info-row">
                                     <span class="info-label">Prescribed by:</span>
-                                    <span class="info-value">Dr. <?php echo htmlspecialchars($prescription['doctor_name']); ?></span>
+                                    <span class="info-value">Dr. <?php echo htmlspecialchars($patient['doctor_name']); ?></span>
+                                </div>
+                                <?php if ($total_amount > 0): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Total Amount:</span>
+                                    <span class="info-value price-display">
+                                        TSh <?php echo number_format($total_amount, 2); ?>
+                                        <button class="edit-price-btn" onclick="toggleEditPriceForm(<?php echo $patient['patient_id']; ?>)">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </button>
+                                    </span>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                            
+                            <?php if (!empty($patient['diagnosis'])): ?>
+                            <div class="card-description">
+                                <strong>Doctor's Diagnosis:</strong><br>
+                                <?php echo htmlspecialchars($patient['diagnosis']); ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <!-- Laboratory Results Section -->
+                            <?php if (!empty($patient['lab_results'])): ?>
+                            <div class="lab-results-section">
+                                <h5><i class="fas fa-vial"></i> Laboratory Test Results</h5>
+                                <?php 
+                                $lab_tests = explode(';;', $patient['lab_results']);
+                                foreach ($lab_tests as $test):
+                                    $test_data = explode('|', $test);
+                                    if (count($test_data) >= 3):
+                                        $test_type = trim($test_data[0]);
+                                        $test_result = trim($test_data[1]);
+                                        $lab_test_id = trim($test_data[2]);
+                                ?>
+                                <div class="lab-test-item">
+                                    <div class="test-details">
+                                        <div class="test-type"><?php echo htmlspecialchars($test_type); ?></div>
+                                        <div class="test-results"><?php echo htmlspecialchars($test_result); ?></div>
+                                    </div>
+                                    <div class="test-actions">
+                                        <span style="color: #3b82f6; font-weight: bold; font-size: 0.9rem;">
+                                            <i class="fas fa-check-circle"></i> Completed
+                                        </span>
+                                    </div>
+                                </div>
+                                <?php 
+                                    endif;
+                                endforeach; 
+                                ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <div class="medications-list">
+                                <strong style="display: block; margin-bottom: 15px; color: #1e293b; font-size: 1rem;">Dispensed Medications:</strong>
+                                <?php 
+                                $prescriptions = explode(';;', $patient['prescriptions_data']);
+                                foreach ($prescriptions as $prescription):
+                                    $med_data = explode('|', $prescription);
+                                    if (count($med_data) >= 6):
+                                        $med_name = $med_data[0];
+                                        $dosage = $med_data[1];
+                                        $frequency = $med_data[2];
+                                        $duration = $med_data[3];
+                                        $instructions = $med_data[4];
+                                        $prescription_id = $med_data[5];
+                                ?>
+                                <div class="medication-item">
+                                    <div class="medication-details">
+                                        <div class="medication-name"><?php echo htmlspecialchars($med_name); ?></div>
+                                        <div class="medication-specs">
+                                            <strong>Dosage:</strong> <?php echo htmlspecialchars($dosage); ?> | 
+                                            <strong>Frequency:</strong> <?php echo htmlspecialchars($frequency); ?> | 
+                                            <strong>Duration:</strong> <?php echo htmlspecialchars($duration); ?>
+                                            <?php if (!empty($instructions)): ?>
+                                            | <strong>Instructions:</strong> <?php echo htmlspecialchars($instructions); ?>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                    <div class="medication-actions">
+                                        <span style="color: #059669; font-weight: bold; font-size: 0.9rem;">
+                                            <i class="fas fa-check-circle"></i> Dispensed
+                                        </span>
+                                    </div>
+                                </div>
+                                <?php 
+                                    endif;
+                                endforeach; 
+                                ?>
+                                
+                                <!-- Edit Total Price Form (Hidden by default) -->
+                                <div id="edit_price_form_<?php echo $patient['patient_id']; ?>" class="edit-price-form" style="display: none;">
+                                    <form method="POST" action="">
+                                        <input type="hidden" name="patient_id" value="<?php echo $patient['patient_id']; ?>">
+                                        
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label class="form-label">New Total Price (TSh)</label>
+                                                <input type="number" name="new_price" class="form-input" min="0" step="0.01" value="<?php echo $total_amount; ?>" required>
+                                            </div>
+                                            
+                                            <div class="form-group">
+                                                <label class="form-label">Reason for Edit</label>
+                                                <input type="text" name="reason" class="form-input" placeholder="Reason for price change">
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="action-buttons">
+                                            <button type="submit" name="edit_total_price" class="btn btn-warning">
+                                                <i class="fas fa-save"></i> Update Total Price
+                                            </button>
+                                            <button type="button" class="btn btn-secondary" onclick="toggleEditPriceForm(<?php echo $patient['patient_id']; ?>)">
+                                                <i class="fas fa-times"></i> Cancel
+                                            </button>
+                                        </div>
+                                    </form>
                                 </div>
                             </div>
                             
-                            <div class="card-description">
-                                <strong>Medication Details:</strong><br>
-                                <strong>Dosage:</strong> <?php echo htmlspecialchars($prescription['dosage'] ?? 'Not specified'); ?><br>
-                                <strong>Frequency:</strong> <?php echo htmlspecialchars($prescription['frequency'] ?? 'Not specified'); ?><br>
-                                <strong>Duration:</strong> <?php echo htmlspecialchars($prescription['duration'] ?? 'Not specified'); ?>
-                            </div>
-                            
                             <div class="card-actions">
-                                <button class="btn btn-primary" onclick="printPrescription(<?php echo $prescription['id']; ?>)">
-                                    <i class="fas fa-print"></i> Print
+                                <button class="btn btn-primary" onclick="printAllPrescriptions(<?php echo $patient['patient_id']; ?>)">
+                                    <i class="fas fa-print"></i> Print All
                                 </button>
-                                <!-- <button class="btn btn-info" onclick="viewPrescriptionDetails(<?php echo $prescription['id']; ?>)">
-                                    <i class="fas fa-eye"></i> View Details
-                                </button> -->
                             </div>
                         </div>
                         <?php endforeach; ?>
@@ -1157,55 +1959,46 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             <!-- Laboratory Results Tab -->
             <div id="lab-results-tab" class="tab-content">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
-                    <i class="fas fa-file-medical-alt"></i> Laboratory Results
+                    <i class="fas fa-file-medical-alt"></i> Laboratory Results by Patient
                 </h3>
                 
-                <?php if (empty($lab_results)): ?>
+                <?php if (empty($lab_results_by_patient)): ?>
                     <div class="empty-state">
                         <i class="fas fa-vial"></i>
                         <h4>No Laboratory Results</h4>
                         <p>Laboratory results will appear here once they are completed.</p>
                     </div>
                 <?php else: ?>
-                    <div class="cards-grid">
-                        <?php foreach ($lab_results as $result): ?>
-                        <div class="card lab-result">
-                            <div class="card-header">
-                                <div class="card-title"><?php echo htmlspecialchars($result['test_type']); ?></div>
-                                <div class="card-status status-completed">Completed</div>
+                    <div class="lab-results-grid">
+                        <?php foreach ($lab_results_by_patient as $patient): ?>
+                        <div class="lab-patient-card">
+                            <div class="patient-header">
+                                <div class="patient-name"><?php echo htmlspecialchars($patient['patient_name']); ?></div>
+                                <div class="test-count"><?php echo $patient['test_count']; ?> Tests</div>
                             </div>
                             
                             <div class="card-info">
                                 <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($result['patient_name']); ?></span>
-                                </div>
-                                <div class="info-row">
                                     <span class="info-label">Card No:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($result['card_no']); ?></span>
+                                    <span class="info-value"><?php echo htmlspecialchars($patient['card_no']); ?></span>
                                 </div>
                                 <div class="info-row">
                                     <span class="info-label">Age/Gender:</span>
-                                    <span class="info-value"><?php echo $result['age'] . ' yrs / ' . ucfirst($result['gender']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Requested by:</span>
-                                    <span class="info-value">Dr. <?php echo htmlspecialchars($result['doctor_name']); ?></span>
+                                    <span class="info-value"><?php echo $patient['age'] . ' yrs / ' . ucfirst($patient['gender']); ?></span>
                                 </div>
                             </div>
                             
-                            <?php if (!empty($result['results'])): ?>
-                            <div class="card-description" style="background: #ecfdf5; border-left: 4px solid #10b981;">
-                                <strong>Test Results:</strong><br>
-                                <?php echo htmlspecialchars($result['results']); ?>
+                            <div class="tests-summary">
+                                <strong>Laboratory Tests Summary:</strong>
+                                <?php 
+                                $tests = explode(' | ', $patient['all_tests']);
+                                foreach ($tests as $test): 
+                                ?>
+                                    <div class="test-item">
+                                        <?php echo htmlspecialchars($test); ?>
+                                    </div>
+                                <?php endforeach; ?>
                             </div>
-                            <?php endif; ?>
-                            
-                            <!-- <div class="card-actions">
-                                <button class="btn btn-primary" onclick="printLabResult(<?php echo $result['id']; ?>)">
-                                    <i class="fas fa-print"></i> Print Results
-                                </button>
-                            </div> -->
                         </div>
                         <?php endforeach; ?>
                     </div>
@@ -1355,6 +2148,13 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                     infoFiltered: "(filtered from _MAX_ total entries)"
                 }
             });
+
+            // Restore scroll position after form submission
+            const scrollPosition = sessionStorage.getItem('scrollPosition');
+            if (scrollPosition) {
+                window.scrollTo(0, parseInt(scrollPosition));
+                sessionStorage.removeItem('scrollPosition');
+            }
         });
 
         // Function to show tabs
@@ -1376,25 +2176,53 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             event.target.classList.add('active');
         }
 
-        // Function to view patient lab results
-        function viewPatientLabResults(patientName, prescriptionId) {
-            alert('Viewing laboratory results for: ' + patientName + '\nPrescription ID: ' + prescriptionId);
-            showTab('lab-results');
+        // Function to update total amount for a patient (INCLUDING LAB TESTS)
+        function updateTotalAmount(patientId) {
+            const form = document.getElementById('dispenseForm_' + patientId);
+            let total = 0;
+            
+            // Add medicine prices
+            const priceInputs = form.querySelectorAll('.price-input-field');
+            priceInputs.forEach(input => {
+                const prescriptionId = input.name.match(/\[(\d+)\]/)[1];
+                const availableRadio = form.querySelector('input[name="prescriptions[' + prescriptionId + '][available]"][value="yes"]');
+                
+                if (availableRadio.checked) {
+                    total += parseFloat(input.value) || 0;
+                }
+            });
+            
+            // Add lab test prices
+            const labPriceInputs = form.querySelectorAll('.lab-price-input-field');
+            labPriceInputs.forEach(input => {
+                total += parseFloat(input.value) || 0;
+            });
+            
+            const totalAmountElement = document.getElementById('totalAmount_' + patientId);
+            totalAmountElement.textContent = 'Total Amount: TSh ' + total.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
         }
 
-        // Function to print prescription
-        function printPrescription(prescriptionId) {
-            window.open('print_prescription.php?id=' + prescriptionId, '_blank');
+        // Function to toggle edit price form
+        function toggleEditPriceForm(patientId) {
+            const form = document.getElementById('edit_price_form_' + patientId);
+            if (form.style.display === 'none') {
+                form.style.display = 'block';
+            } else {
+                form.style.display = 'none';
+            }
         }
 
-        // Function to print lab result
-        function printLabResult(testId) {
-            window.open('../laboratory/print_lab_result.php?id=' + testId, '_blank');
+        // Function to print all prescriptions for a patient
+        function printAllPrescriptions(patientId) {
+            window.open('print_patient_prescriptions.php?patient_id=' + patientId, '_blank');
         }
 
-        // Function to view prescription details
-        function viewPrescriptionDetails(prescriptionId) {
-            alert('Viewing prescription details: ' + prescriptionId);
+        // Function to print lab results
+        function printLabResults(patientId) {
+            window.open('../laboratory/print_lab_results.php?patient_id=' + patientId, '_blank');
         }
 
         // Function to view patient details
@@ -1424,6 +2252,18 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         // Initial time update
         updateTime();
         setInterval(updateTime, 60000);
+
+        // Initialize total amounts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            <?php foreach ($pending_patients as $patient): ?>
+            updateTotalAmount(<?php echo $patient['patient_id']; ?>);
+            <?php endforeach; ?>
+        });
+
+        // Save scroll position before form submission
+        document.addEventListener('submit', function() {
+            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
+        });
     </script>
 </body>
 </html>

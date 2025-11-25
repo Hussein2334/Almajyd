@@ -16,39 +16,81 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'doctor') {
 $success_message = '';
 $error_message = '';
 
-// Handle Add Prescription
+// Handle Add Multiple Prescriptions
 if (isset($_POST['add_prescription'])) {
     $checking_form_id = $_POST['checking_form_id'];
-    $medicine_name = $_POST['medicine_name'];
-    $dosage = $_POST['dosage'];
-    $frequency = $_POST['frequency'];
-    $duration = $_POST['duration'];
+    $medicine_names = $_POST['medicine_name'];
+    $dosages = $_POST['dosage'];
+    $frequencies = $_POST['frequency'];
+    $durations = $_POST['duration'];
     $instructions = $_POST['instructions'];
     
     try {
-        $stmt = $pdo->prepare("INSERT INTO prescriptions (checking_form_id, medicine_name, dosage, frequency, duration, instructions, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')");
-        $stmt->execute([$checking_form_id, $medicine_name, $dosage, $frequency, $duration, $instructions]);
+        $pdo->beginTransaction();
         
-        $success_message = "Prescription added successfully!";
+        // Loop through all medicines and insert each one
+        for ($i = 0; $i < count($medicine_names); $i++) {
+            if (!empty($medicine_names[$i])) {
+                $stmt = $pdo->prepare("INSERT INTO prescriptions (checking_form_id, medicine_name, dosage, frequency, duration, instructions, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')");
+                $stmt->execute([
+                    $checking_form_id, 
+                    $medicine_names[$i], 
+                    $dosages[$i] ?? '', 
+                    $frequencies[$i] ?? '', 
+                    $durations[$i] ?? '', 
+                    $instructions[$i] ?? ''
+                ]);
+            }
+        }
+        
+        $pdo->commit();
+        $success_message = "Prescriptions added successfully!";
+        
+        // Clear the form by redirecting
+        header("Location: ".$_SERVER['PHP_SELF']."#prescription-form");
+        exit;
+        
     } catch (PDOException $e) {
-        $error_message = "Error adding prescription: " . $e->getMessage();
+        $pdo->rollBack();
+        $error_message = "Error adding prescriptions: " . $e->getMessage();
     }
 }
 
-// Handle Add Laboratory Test
+// Handle Add Multiple Laboratory Tests
 if (isset($_POST['add_lab_test'])) {
     $checking_form_id = $_POST['checking_form_id'];
-    $test_type = $_POST['test_type'];
-    $test_description = $_POST['test_description'];
+    $test_types = $_POST['test_type'];
+    $test_descriptions = $_POST['test_description'];
     $conducted_by = $_SESSION['user_id'];
     
     try {
-        $stmt = $pdo->prepare("INSERT INTO laboratory_tests (checking_form_id, test_type, test_description, conducted_by, status) VALUES (?, ?, ?, ?, 'pending')");
-        $stmt->execute([$checking_form_id, $test_type, $test_description, $conducted_by]);
+        $pdo->beginTransaction();
         
-        $success_message = "Laboratory test requested successfully!";
+        // Loop through all test types and insert each one
+        $tests_added = 0;
+        for ($i = 0; $i < count($test_types); $i++) {
+            if (!empty($test_types[$i])) {
+                $stmt = $pdo->prepare("INSERT INTO laboratory_tests (checking_form_id, test_type, test_description, conducted_by, status) VALUES (?, ?, ?, ?, 'pending')");
+                $stmt->execute([
+                    $checking_form_id, 
+                    $test_types[$i], 
+                    $test_descriptions[$i] ?? '', 
+                    $conducted_by
+                ]);
+                $tests_added++;
+            }
+        }
+        
+        $pdo->commit();
+        $success_message = $tests_added . " laboratory test(s) requested successfully!";
+        
+        // Clear the form by redirecting
+        header("Location: ".$_SERVER['PHP_SELF']."#lab-form");
+        exit;
+        
     } catch (PDOException $e) {
-        $error_message = "Error adding laboratory test: " . $e->getMessage();
+        $pdo->rollBack();
+        $error_message = "Error adding laboratory tests: " . $e->getMessage();
     }
 }
 
@@ -66,6 +108,11 @@ if (isset($_POST['create_checking_form'])) {
         
         $checking_form_id = $pdo->lastInsertId();
         $success_message = "Patient examination completed successfully! Checking Form ID: " . $checking_form_id;
+        
+        // Clear the form by redirecting
+        header("Location: ".$_SERVER['PHP_SELF']."#examination-form");
+        exit;
+        
     } catch (PDOException $e) {
         $error_message = "Error creating checking form: " . $e->getMessage();
     }
@@ -165,7 +212,7 @@ $checking_forms = $pdo->query("SELECT cf.*, p.full_name as patient_name, p.card_
                              WHERE cf.doctor_id = " . $_SESSION['user_id'] . "
                              ORDER BY cf.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get laboratory test results for this doctor - LIMITED for initial display
+// Get laboratory test results for this doctor - GROUPED BY PATIENT
 $lab_results_limit = 6;
 $lab_results = $pdo->query("SELECT lt.*, p.full_name as patient_name, p.card_no, 
                            u.full_name as lab_technician, cf.symptoms, cf.diagnosis
@@ -177,6 +224,32 @@ $lab_results = $pdo->query("SELECT lt.*, p.full_name as patient_name, p.card_no,
                     AND lt.status = 'completed'
                     ORDER BY lt.updated_at DESC 
                     LIMIT $lab_results_limit")->fetchAll(PDO::FETCH_ASSOC);
+
+// Group lab results by patient
+$grouped_results = [];
+foreach ($lab_results as $result) {
+    $patient_key = $result['patient_name'] . '_' . $result['card_no'];
+    if (!isset($grouped_results[$patient_key])) {
+        $grouped_results[$patient_key] = [
+            'patient_name' => $result['patient_name'],
+            'card_no' => $result['card_no'],
+            'lab_technician' => $result['lab_technician'],
+            'latest_date' => $result['updated_at'],
+            'tests' => []
+        ];
+    }
+    $grouped_results[$patient_key]['tests'][] = $result;
+    
+    // Update latest date if this test is newer
+    if (strtotime($result['updated_at']) > strtotime($grouped_results[$patient_key]['latest_date'])) {
+        $grouped_results[$patient_key]['latest_date'] = $result['updated_at'];
+    }
+}
+
+// Sort grouped results by latest date
+usort($grouped_results, function($a, $b) {
+    return strtotime($b['latest_date']) - strtotime($a['latest_date']);
+});
 
 // Get total count for "See All"
 $total_results_stmt = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests lt 
@@ -675,6 +748,89 @@ $current_time = date('h:i A');
             box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
         }
 
+        /* Prescription Medicine Rows & Test Type Rows */
+        .medicine-row {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #e2e8f0;
+            transition: all 0.3s ease;
+        }
+        
+        .medicine-row:hover {
+            border-color: #3b82f6;
+            background: #f0f9ff;
+        }
+        
+        .test-type-row {
+            background: #f0f9ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #bae6fd;
+            transition: all 0.3s ease;
+        }
+        
+        .test-type-row:hover {
+            border-color: #3b82f6;
+            background: #e0f2fe;
+        }
+        
+        .medicine-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .medicine-title {
+            font-weight: 600;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .remove-medicine {
+            background: #ef4444;
+            color: white;
+            border: none;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .remove-medicine:hover {
+            background: #dc2626;
+            transform: scale(1.1);
+        }
+        
+        .add-medicine-btn {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .add-medicine-btn:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+
         /* Recent Activity Tables */
         .tables-grid {
             display: grid;
@@ -702,7 +858,7 @@ $current_time = date('h:i A');
             font-size: 1.1rem;
         }
 
-        /* Laboratory Results Section - IMPROVED */
+        /* Laboratory Results Section - GROUPED BY PATIENT */
         .lab-results-section {
             margin-top: 30px;
         }
@@ -762,124 +918,160 @@ $current_time = date('h:i A');
             transform: translateY(-2px);
         }
         
-        .results-grid {
+        .patient-results-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
             gap: 20px;
             margin-top: 20px;
         }
         
-        .result-card {
+        .patient-result-card {
             background: white;
-            padding: 20px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
             border-left: 4px solid #10b981;
             transition: all 0.3s ease;
-            position: relative;
             overflow: hidden;
         }
         
-        .result-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #10b981, #3b82f6);
-        }
-        
-        .result-card:hover {
+        .patient-result-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 8px 30px rgba(0,0,0,0.15);
         }
         
-        .result-header {
+        .patient-result-header {
+            background: linear-gradient(135deg, #d1fae5, #10b981);
+            padding: 20px;
+            color: #065f46;
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
+            align-items: center;
         }
         
-        .result-type {
-            font-weight: bold;
-            color: #1e293b;
-            font-size: 1.1rem;
+        .patient-info h4 {
+            margin: 0 0 5px 0;
+            font-size: 1.2rem;
             display: flex;
             align-items: center;
             gap: 8px;
         }
         
-        .result-type i {
-            color: #3b82f6;
+        .patient-info p {
+            margin: 0;
+            font-size: 0.9rem;
+            opacity: 0.9;
         }
         
-        .result-status {
-            padding: 4px 12px;
+        .tests-count-badge {
+            background: #065f46;
+            color: white;
+            padding: 8px 12px;
             border-radius: 20px;
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             font-weight: 600;
-            text-transform: uppercase;
-            background: #d1fae5;
-            color: #065f46;
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
         
-        .result-info {
-            margin-bottom: 15px;
+        .patient-details {
+            padding: 15px 20px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
         }
         
-        .info-row {
+        .detail-row {
             display: flex;
             justify-content: space-between;
             margin-bottom: 8px;
             font-size: 0.9rem;
         }
         
-        .info-label {
+        .detail-label {
             color: #64748b;
             font-weight: 500;
         }
         
-        .info-value {
+        .detail-value {
             color: #1e293b;
             font-weight: 600;
         }
         
-        .result-description {
-            background: #f8fafc;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            font-size: 0.9rem;
-            color: #475569;
-            border-left: 3px solid #e2e8f0;
+        .tests-results {
+            padding: 20px;
         }
         
-        .result-findings {
-            background: #ecfdf5;
+        .test-result-item {
+            background: #f8fafc;
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 15px;
-            border-left: 4px solid #10b981;
+            border-left: 3px solid #3b82f6;
+        }
+        
+        .test-result-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .test-result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .test-type {
+            font-weight: 600;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .test-date {
+            color: #64748b;
+            font-size: 0.8rem;
+        }
+        
+        .test-description {
+            color: #64748b;
+            font-size: 0.85rem;
+            margin-bottom: 10px;
+        }
+        
+        .test-findings {
+            background: #ecfdf5;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+            border-left: 3px solid #10b981;
         }
         
         .findings-label {
             font-weight: bold;
             color: #065f46;
-            margin-bottom: 8px;
+            margin-bottom: 5px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+            font-size: 0.85rem;
         }
         
-        .action-buttons {
+        .findings-content {
+            color: #065f46;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        
+        .patient-actions {
+            padding: 15px 20px;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
             display: flex;
             gap: 10px;
-            margin-top: 15px;
             flex-wrap: wrap;
         }
-        
+
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -977,7 +1169,7 @@ $current_time = date('h:i A');
         
         .all-results-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
             gap: 20px;
         }
 
@@ -1128,7 +1320,7 @@ $current_time = date('h:i A');
                 gap: 15px;
             }
             
-            .results-grid {
+            .patient-results-grid {
                 grid-template-columns: 1fr;
             }
             
@@ -1347,7 +1539,7 @@ $current_time = date('h:i A');
             </div>
         </div>
 
-        <!-- Laboratory Results Section - IMPROVED -->
+        <!-- Laboratory Results Section - GROUPED BY PATIENT -->
         <div class="lab-results-section">
             <div class="table-card">
                 <div class="section-header">
@@ -1356,7 +1548,7 @@ $current_time = date('h:i A');
                     </h3>
                     <div class="section-actions">
                         <span class="results-count">
-                            <?php echo count($lab_results); ?> of <?php echo $total_results; ?>
+                            <?php echo count($grouped_results); ?> of <?php echo $total_results; ?> patients
                         </span>
                         <?php if ($total_results > $lab_results_limit): ?>
                         <button class="see-all-btn" onclick="showAllResults()">
@@ -1366,7 +1558,7 @@ $current_time = date('h:i A');
                     </div>
                 </div>
                 
-                <?php if (empty($lab_results)): ?>
+                <?php if (empty($grouped_results)): ?>
                     <div class="empty-state">
                         <i class="fas fa-vial"></i>
                         <h4>No Laboratory Results Available</h4>
@@ -1378,69 +1570,83 @@ $current_time = date('h:i A');
                         </div>
                     </div>
                 <?php else: ?>
-                    <div class="results-grid">
-                        <?php foreach ($lab_results as $result): ?>
-                        <div class="result-card">
-                            <div class="result-header">
-                                <div class="result-type">
-                                    <i class="fas fa-microscope"></i>
-                                    <?php echo htmlspecialchars($result['test_type']); ?>
+                    <div class="patient-results-grid">
+                        <?php foreach ($grouped_results as $patient_group): ?>
+                        <div class="patient-result-card">
+                            <!-- Patient Header -->
+                            <div class="patient-result-header">
+                                <div class="patient-info">
+                                    <h4>
+                                        <i class="fas fa-user-injured"></i>
+                                        <?php echo htmlspecialchars($patient_group['patient_name']); ?>
+                                    </h4>
+                                    <p>Card No: <?php echo htmlspecialchars($patient_group['card_no']); ?></p>
                                 </div>
-                                <div class="result-status">Completed</div>
-                            </div>
-                            
-                            <div class="result-info">
-                                <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($result['patient_name']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Card No:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($result['card_no']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Lab Technician:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($result['lab_technician'] ?? 'Not specified'); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Completed Date:</span>
-                                    <span class="info-value"><?php echo date('M j, Y H:i', strtotime($result['updated_at'])); ?></span>
+                                <div class="tests-count-badge">
+                                    <i class="fas fa-vial"></i>
+                                    <?php echo count($patient_group['tests']); ?> Tests
                                 </div>
                             </div>
                             
-                            <?php if (!empty($result['test_description'])): ?>
-                            <div class="result-description">
-                                <strong>Test Description:</strong><br>
-                                <?php echo htmlspecialchars($result['test_description']); ?>
-                            </div>
-                            <?php endif; ?>
-                            
-                            <?php if (!empty($result['results'])): ?>
-                            <div class="result-findings">
-                                <div class="findings-label">
-                                    <i class="fas fa-microscope"></i>
-                                    Laboratory Findings:
+                            <!-- Patient Details -->
+                            <div class="patient-details">
+                                <div class="detail-row">
+                                    <span class="detail-label">Lab Technician:</span>
+                                    <span class="detail-value"><?php echo htmlspecialchars($patient_group['lab_technician'] ?? 'Not specified'); ?></span>
                                 </div>
-                                <div style="color: #065f46; font-size: 0.9rem; line-height: 1.5;">
-                                    <?php 
-                                    $results = htmlspecialchars($result['results']);
-                                    if (strlen($results) > 150) {
-                                        echo substr($results, 0, 150) . '...';
-                                    } else {
-                                        echo $results;
-                                    }
-                                    ?>
+                                <div class="detail-row">
+                                    <span class="detail-label">Latest Results:</span>
+                                    <span class="detail-value"><?php echo date('M j, Y H:i', strtotime($patient_group['latest_date'])); ?></span>
                                 </div>
                             </div>
-                            <?php endif; ?>
                             
-                            <div class="action-buttons">
-                                <button class="btn btn-primary" onclick="printTestResult(<?php echo $result['id']; ?>)">
-                                    <i class="fas fa-print"></i> Print Result
+                            <!-- Tests Results -->
+                            <div class="tests-results">
+                                <?php foreach ($patient_group['tests'] as $test): ?>
+                                <div class="test-result-item">
+                                    <div class="test-result-header">
+                                        <div class="test-type">
+                                            <i class="fas fa-microscope"></i>
+                                            <?php echo htmlspecialchars($test['test_type']); ?>
+                                        </div>
+                                        <div class="test-date">
+                                            <?php echo date('M j, Y', strtotime($test['updated_at'])); ?>
+                                        </div>
+                                    </div>
+                                    
+                                    <?php if (!empty($test['test_description'])): ?>
+                                    <div class="test-description">
+                                        <?php echo htmlspecialchars($test['test_description']); ?>
+                                    </div>
+                                    <?php endif; ?>
+                                    
+                                    <?php if (!empty($test['results'])): ?>
+                                    <div class="test-findings">
+                                        <div class="findings-label">
+                                            <i class="fas fa-file-medical"></i>
+                                            Laboratory Findings:
+                                        </div>
+                                        <div class="findings-content">
+                                            <?php echo htmlspecialchars($test['results']); ?>
+                                        </div>
+                                    </div>
+                                    <?php else: ?>
+                                    <div style="color: #64748b; font-size: 0.85rem; font-style: italic;">
+                                        No results available for this test.
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                            
+                            <!-- Action Buttons -->
+                            <div class="patient-actions">
+                                <button class="btn btn-primary" onclick="printPatientResults('<?php echo htmlspecialchars($patient_group['patient_name']); ?>', '<?php echo htmlspecialchars($patient_group['card_no']); ?>')">
+                                    <i class="fas fa-print"></i> Print All Results
                                 </button>
-                                <!-- <button class="btn btn-info" onclick="viewFullResult(<?php echo $result['id']; ?>)">
-                                    <i class="fas fa-eye"></i> View Full
-                                </button> -->
+                                <button class="btn btn-info" onclick="viewPatientHistory('<?php echo htmlspecialchars($patient_group['patient_name']); ?>', '<?php echo htmlspecialchars($patient_group['card_no']); ?>')">
+                                    <i class="fas fa-history"></i> View History
+                                </button>
                             </div>
                         </div>
                         <?php endforeach; ?>
@@ -1460,7 +1666,7 @@ $current_time = date('h:i A');
         <!-- Quick Action Forms -->
         <div class="form-grid">
             <!-- Patient Examination Form -->
-            <div class="form-card">
+            <div class="form-card" id="examination-form">
                 <h4><i class="fas fa-stethoscope"></i> Patient Examination</h4>
                 <form method="POST" action="">
                     <div class="form-group">
@@ -1496,10 +1702,10 @@ $current_time = date('h:i A');
                 </form>
             </div>
 
-            <!-- Add Prescription Form -->
-            <div class="form-card">
+            <!-- Add Prescription Form - MULTIPLE MEDICINES -->
+            <div class="form-card" id="prescription-form">
                 <h4><i class="fas fa-prescription"></i> Add Prescription</h4>
-                <form method="POST" action="">
+                <form method="POST" action="" id="prescriptionForm">
                     <div class="form-group">
                         <label class="form-label">Select Checking Form *</label>
                         <select name="checking_form_id" class="form-select" required>
@@ -1512,44 +1718,66 @@ $current_time = date('h:i A');
                         </select>
                     </div>
                     
-                    <div class="form-group">
-                        <label class="form-label">Medicine Name *</label>
-                        <input type="text" name="medicine_name" class="form-input" placeholder="Enter medicine name" required>
+                    <!-- Medicine Rows Container -->
+                    <div id="medicineRows">
+                        <!-- First Medicine Row -->
+                        <div class="medicine-row" id="medicineRow_0">
+                            <div class="medicine-header">
+                                <div class="medicine-title">
+                                    <i class="fas fa-pills"></i> Medicine #1
+                                </div>
+                                <button type="button" class="remove-medicine" onclick="removeMedicine(0)" style="display: none;">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Medicine Name *</label>
+                                <input type="text" name="medicine_name[]" class="form-input" placeholder="Enter medicine name" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Dosage</label>
+                                <input type="text" name="dosage[]" class="form-input" placeholder="e.g., 500mg">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Frequency</label>
+                                <input type="text" name="frequency[]" class="form-input" placeholder="e.g., Twice daily">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Duration</label>
+                                <input type="text" name="duration[]" class="form-input" placeholder="e.g., 7 days">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Instructions</label>
+                                <textarea name="instructions[]" class="form-textarea" placeholder="Additional instructions for patient"></textarea>
+                            </div>
+                        </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label class="form-label">Dosage</label>
-                        <input type="text" name="dosage" class="form-input" placeholder="e.g., 500mg">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">Frequency</label>
-                        <input type="text" name="frequency" class="form-input" placeholder="e.g., Twice daily">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">Duration</label>
-                        <input type="text" name="duration" class="form-input" placeholder="e.g., 7 days">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label class="form-label">Instructions</label>
-                        <textarea name="instructions" class="form-textarea" placeholder="Additional instructions for patient"></textarea>
-                    </div>
-                    
-                    <button type="submit" name="add_prescription" class="btn btn-primary">
-                        <i class="fas fa-save"></i> Save Prescription
+                    <!-- Add More Medicine Button -->
+                    <button type="button" class="add-medicine-btn" onclick="addMedicine()">
+                        <i class="fas fa-plus"></i> Add Another Medicine
                     </button>
+                    
+                    <div style="margin-top: 20px;">
+                        <button type="submit" name="add_prescription" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Save All Prescriptions
+                        </button>
+                    </div>
                 </form>
             </div>
         </div>
 
         <!-- Additional Forms Grid -->
         <div class="form-grid" style="margin-top: 20px;">
-            <!-- Laboratory Test Request Form -->
-            <div class="form-card">
-                <h4><i class="fas fa-vial"></i> Request Laboratory Test</h4>
-                <form method="POST" action="">
+            <!-- Laboratory Test Request Form - MULTIPLE TESTS -->
+            <div class="form-card" id="lab-form">
+                <h4><i class="fas fa-vial"></i> Request Laboratory Tests</h4>
+                <form method="POST" action="" id="labTestForm">
                     <div class="form-group">
                         <label class="form-label">Select Checking Form *</label>
                         <select name="checking_form_id" class="form-select" required>
@@ -1562,36 +1790,64 @@ $current_time = date('h:i A');
                         </select>
                     </div>
                     
-                    <div class="form-group">
-                        <label class="form-label">Test Type *</label>
-                        <select name="test_type" class="form-select" required>
-                            <option value="">Select Test Type</option>
-                            <option value="Blood Test">Blood Test</option>
-                            <option value="Urine Test">Urine Test</option>
-                            <option value="X-Ray">X-Ray</option>
-                            <option value="Ultrasound">Ultrasound</option>
-                            <option value="ECG">ECG</option>
-                            <option value="Blood Pressure">Blood Pressure</option>
-                            <option value="Blood Sugar">Blood Sugar</option>
-                            <option value="Cholesterol">Cholesterol</option>
-                            <option value="Malaria Test">Malaria Test</option>
-                            <option value="Typhoid Test">Typhoid Test</option>
-                        </select>
+                    <!-- Test Types Container -->
+                    <div id="testTypesContainer">
+                        <!-- First Test Type Row -->
+                        <div class="test-type-row" id="testTypeRow_0">
+                            <div class="medicine-header">
+                                <div class="medicine-title">
+                                    <i class="fas fa-microscope"></i> Test Type #1
+                                </div>
+                                <button type="button" class="remove-medicine" onclick="removeTestType(0)" style="display: none;">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Test Type *</label>
+                                <select name="test_type[]" class="form-select" required>
+                                    <option value="">Select Test Type</option>
+                                    <option value="Blood Test">Blood Test</option>
+                                    <option value="Urine Test">Urine Test</option>
+                                    <option value="X-Ray">X-Ray</option>
+                                    <option value="Ultrasound">Ultrasound</option>
+                                    <option value="ECG">ECG</option>
+                                    <option value="Blood Pressure">Blood Pressure</option>
+                                    <option value="Blood Sugar">Blood Sugar</option>
+                                    <option value="Cholesterol">Cholesterol</option>
+                                    <option value="Malaria Test">Malaria Test</option>
+                                    <option value="Typhoid Test">Typhoid Test</option>
+                                    <option value="HIV Test">HIV Test</option>
+                                    <option value="Hepatitis Test">Hepatitis Test</option>
+                                    <option value="Pregnancy Test">Pregnancy Test</option>
+                                    <option value="Stool Test">Stool Test</option>
+                                    <option value="Sputum Test">Sputum Test</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Test Description</label>
+                                <textarea name="test_description[]" class="form-textarea" placeholder="Describe the test requirements, specific parameters, or any special instructions"></textarea>
+                            </div>
+                        </div>
                     </div>
                     
-                    <div class="form-group">
-                        <label class="form-label">Test Description</label>
-                        <textarea name="test_description" class="form-textarea" placeholder="Describe the test requirements"></textarea>
-                    </div>
-                    
-                    <button type="submit" name="add_lab_test" class="btn btn-info">
-                        <i class="fas fa-paper-plane"></i> Request Test
+                    <!-- Add More Test Button -->
+                    <button type="button" class="add-medicine-btn" onclick="addTestType()">
+                        <i class="fas fa-plus"></i> Add Another Test Type
                     </button>
+                    
+                    <div style="margin-top: 20px;">
+                        <button type="submit" name="add_lab_test" class="btn btn-info">
+                            <i class="fas fa-paper-plane"></i> Request All Tests
+                        </button>
+                    </div>
                 </form>
             </div>
 
             <!-- Profile Settings Form -->
-            <div class="form-card">
+            <div class="form-card" id="profile-form">
                 <h4><i class="fas fa-user-cog"></i> Profile Settings</h4>
                 <form method="POST" action="">
                     <div class="form-group">
@@ -1762,6 +2018,212 @@ $current_time = date('h:i A');
             });
         });
 
+        // Medicine counter for dynamic form
+        let medicineCounter = 1;
+
+        // Function to add new medicine row
+        function addMedicine() {
+            const medicineRows = document.getElementById('medicineRows');
+            const newRow = document.createElement('div');
+            newRow.className = 'medicine-row';
+            newRow.id = 'medicineRow_' + medicineCounter;
+            
+            newRow.innerHTML = `
+                <div class="medicine-header">
+                    <div class="medicine-title">
+                        <i class="fas fa-pills"></i> Medicine #${medicineCounter + 1}
+                    </div>
+                    <button type="button" class="remove-medicine" onclick="removeMedicine(${medicineCounter})">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Medicine Name *</label>
+                    <input type="text" name="medicine_name[]" class="form-input" placeholder="Enter medicine name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Dosage</label>
+                    <input type="text" name="dosage[]" class="form-input" placeholder="e.g., 500mg">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Frequency</label>
+                    <input type="text" name="frequency[]" class="form-input" placeholder="e.g., Twice daily">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Duration</label>
+                    <input type="text" name="duration[]" class="form-input" placeholder="e.g., 7 days">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Instructions</label>
+                    <textarea name="instructions[]" class="form-textarea" placeholder="Additional instructions for patient"></textarea>
+                </div>
+            `;
+            
+            medicineRows.appendChild(newRow);
+            medicineCounter++;
+            
+            // Scroll to the new medicine row
+            newRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        // Function to remove medicine row
+        function removeMedicine(index) {
+            const row = document.getElementById('medicineRow_' + index);
+            if (row) {
+                row.remove();
+                // Re-number remaining medicines
+                updateMedicineNumbers();
+            }
+        }
+
+        // Function to update medicine numbers after removal
+        function updateMedicineNumbers() {
+            const medicineRows = document.querySelectorAll('.medicine-row');
+            medicineCounter = 0;
+            
+            medicineRows.forEach((row, index) => {
+                const title = row.querySelector('.medicine-title');
+                title.innerHTML = `<i class="fas fa-pills"></i> Medicine #${index + 1}`;
+                row.id = 'medicineRow_' + index;
+                
+                // Update remove button onclick
+                const removeBtn = row.querySelector('.remove-medicine');
+                removeBtn.onclick = function() { removeMedicine(index); };
+                
+                // Show remove button for all except first
+                if (index === 0) {
+                    removeBtn.style.display = 'none';
+                } else {
+                    removeBtn.style.display = 'flex';
+                }
+                
+                medicineCounter = index + 1;
+            });
+        }
+
+        // Test Type counter for dynamic form
+        let testTypeCounter = 1;
+
+        // Function to add new test type row
+        function addTestType() {
+            const testTypesContainer = document.getElementById('testTypesContainer');
+            const newRow = document.createElement('div');
+            newRow.className = 'test-type-row';
+            newRow.id = 'testTypeRow_' + testTypeCounter;
+            
+            newRow.innerHTML = `
+                <div class="medicine-header">
+                    <div class="medicine-title">
+                        <i class="fas fa-microscope"></i> Test Type #${testTypeCounter + 1}
+                    </div>
+                    <button type="button" class="remove-medicine" onclick="removeTestType(${testTypeCounter})">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Test Type *</label>
+                    <select name="test_type[]" class="form-select" required>
+                        <option value="">Select Test Type</option>
+                        <option value="Blood Test">Blood Test</option>
+                        <option value="Urine Test">Urine Test</option>
+                        <option value="X-Ray">X-Ray</option>
+                        <option value="Ultrasound">Ultrasound</option>
+                        <option value="ECG">ECG</option>
+                        <option value="Blood Pressure">Blood Pressure</option>
+                        <option value="Blood Sugar">Blood Sugar</option>
+                        <option value="Cholesterol">Cholesterol</option>
+                        <option value="Malaria Test">Malaria Test</option>
+                        <option value="Typhoid Test">Typhoid Test</option>
+                        <option value="HIV Test">HIV Test</option>
+                        <option value="Hepatitis Test">Hepatitis Test</option>
+                        <option value="Pregnancy Test">Pregnancy Test</option>
+                        <option value="Stool Test">Stool Test</option>
+                        <option value="Sputum Test">Sputum Test</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Test Description</label>
+                    <textarea name="test_description[]" class="form-textarea" placeholder="Describe the test requirements, specific parameters, or any special instructions"></textarea>
+                </div>
+            `;
+            
+            testTypesContainer.appendChild(newRow);
+            testTypeCounter++;
+            
+            // Scroll to the new test type row
+            newRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        // Function to remove test type row
+        function removeTestType(index) {
+            const row = document.getElementById('testTypeRow_' + index);
+            if (row) {
+                row.remove();
+                // Re-number remaining test types
+                updateTestTypeNumbers();
+            }
+        }
+
+        // Function to update test type numbers after removal
+        function updateTestTypeNumbers() {
+            const testTypeRows = document.querySelectorAll('#testTypesContainer .test-type-row');
+            testTypeCounter = 0;
+            
+            testTypeRows.forEach((row, index) => {
+                const title = row.querySelector('.medicine-title');
+                title.innerHTML = `<i class="fas fa-microscope"></i> Test Type #${index + 1}`;
+                row.id = 'testTypeRow_' + index;
+                
+                // Update remove button onclick
+                const removeBtn = row.querySelector('.remove-medicine');
+                removeBtn.onclick = function() { removeTestType(index); };
+                
+                // Show remove button for all except first
+                if (index === 0) {
+                    removeBtn.style.display = 'none';
+                } else {
+                    removeBtn.style.display = 'flex';
+                }
+                
+                testTypeCounter = index + 1;
+            });
+        }
+
+        // Function to validate lab test form before submission
+        function validateLabTestForm() {
+            const testTypes = document.getElementsByName('test_type[]');
+            let hasValidTest = false;
+            
+            for (let i = 0; i < testTypes.length; i++) {
+                if (testTypes[i].value !== '') {
+                    hasValidTest = true;
+                    break;
+                }
+            }
+            
+            if (!hasValidTest) {
+                alert('Please add at least one test type!');
+                return false;
+            }
+            
+            return true;
+        }
+
+        // Add event listener to lab test form
+        document.getElementById('labTestForm').addEventListener('submit', function(e) {
+            if (!validateLabTestForm()) {
+                e.preventDefault();
+            }
+        });
+
         // Function to show step content with ACTIONS
         function showStep(num) {
             // Remove active class from all steps
@@ -1825,7 +2287,7 @@ $current_time = date('h:i A');
                             <i class="fas fa-plus"></i> Add Examination
                         </button>
                         <button class="btn btn-info" onclick="scrollToLabForm()">
-                            <i class="fas fa-vial"></i> Request Lab Test
+                            <i class="fas fa-vial"></i> Request Lab Tests
                         </button>
                     </div>
                     
@@ -1847,7 +2309,7 @@ $current_time = date('h:i A');
                         <div class="action-card" onclick="scrollToLabForm()">
                             <h4><i class="fas fa-vial"></i> Lab Requests</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Request lab tests</li>
+                                <li><i class="fas fa-check"></i> Request multiple lab tests</li>
                                 <li><i class="fas fa-check"></i> Various test types</li>
                                 <li><i class="fas fa-check"></i> Test descriptions</li>
                             </ul>
@@ -1873,9 +2335,9 @@ $current_time = date('h:i A');
                         <div class="action-card" onclick="scrollToPrescriptionForm()">
                             <h4><i class="fas fa-prescription"></i> Add Prescription</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Prescribe medications</li>
+                                <li><i class="fas fa-check"></i> Prescribe multiple medications</li>
                                 <li><i class="fas fa-check"></i> Set dosage and frequency</li>
-                                <li><i class="fas fa-check"></i> Add instructions</li>
+                                <li><i class="fas fa-check"></i> Add instructions for each medicine</li>
                             </ul>
                             <div class="action-buttons">
                                 <button class="btn btn-primary" onclick="scrollToPrescriptionForm()">
@@ -1961,19 +2423,19 @@ $current_time = date('h:i A');
 
         // Helper functions
         function scrollToExaminationForm() {
-            document.querySelector('.form-card:first-child').scrollIntoView({ 
+            document.getElementById('examination-form').scrollIntoView({ 
                 behavior: 'smooth' 
             });
         }
 
         function scrollToPrescriptionForm() {
-            document.querySelectorAll('.form-card')[1].scrollIntoView({ 
+            document.getElementById('prescription-form').scrollIntoView({ 
                 behavior: 'smooth' 
             });
         }
 
         function scrollToLabForm() {
-            document.querySelectorAll('.form-card')[2].scrollIntoView({ 
+            document.getElementById('lab-form').scrollIntoView({ 
                 behavior: 'smooth' 
             });
         }
@@ -1985,7 +2447,7 @@ $current_time = date('h:i A');
         }
 
         function scrollToProfileForm() {
-            document.querySelector('.form-card:last-child').scrollIntoView({ 
+            document.getElementById('profile-form').scrollIntoView({ 
                 behavior: 'smooth' 
             });
         }
@@ -2027,10 +2489,14 @@ $current_time = date('h:i A');
             }
         }
 
-        // Function to view full result
-        function viewFullResult(testId) {
-            // You can implement a detailed view modal here
-            alert('Viewing full details for test ID: ' + testId + '\nThis would show complete results in a detailed view.');
+        // Function to print patient results
+        function printPatientResults(patientName, cardNo) {
+            window.open('print_patient_results.php?patient=' + encodeURIComponent(patientName) + '&card=' + encodeURIComponent(cardNo), '_blank');
+        }
+
+        // Function to view patient history
+        function viewPatientHistory(patientName, cardNo) {
+            alert('Viewing medical history for: ' + patientName + ' (Card: ' + cardNo + ')\nThis would show complete patient medical history.');
         }
 
         // Function to print test result
