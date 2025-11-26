@@ -34,17 +34,7 @@ $checking_stmt->execute([$patient_id]);
 $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
 $checking_form_id = $checking_form['id'] ?? 0;
 
-// Get all payments for this patient
-$payments_stmt = $pdo->prepare("
-    SELECT amount, payment_type, created_at 
-    FROM payments 
-    WHERE patient_id = ? AND checking_form_id = ? AND status = 'pending'
-    ORDER BY created_at DESC
-");
-$payments_stmt->execute([$patient_id, $checking_form_id]);
-$all_payments = $payments_stmt->fetchAll(PDO::FETCH_ASSOC);
-
-// Get prescriptions data
+// Get prescriptions with their ACTUAL prices from payments table
 $prescriptions_stmt = $pdo->prepare("
     SELECT 
         pr.id,
@@ -54,23 +44,45 @@ $prescriptions_stmt = $pdo->prepare("
         pr.duration,
         pr.instructions,
         pr.status,
-        pr.created_at
+        pr.created_at,
+        COALESCE(
+            (SELECT medicine_amount FROM payments 
+             WHERE checking_form_id = cf.id AND payment_type = 'medicine_and_lab' 
+             ORDER BY id DESC LIMIT 1),
+            (SELECT amount FROM payments 
+             WHERE checking_form_id = cf.id AND payment_type = 'medicine' 
+             ORDER BY id DESC LIMIT 1),
+            0
+        ) as total_medicine_amount,
+        (SELECT COUNT(*) FROM prescriptions pr2 
+         WHERE pr2.checking_form_id = cf.id AND pr2.status = 'dispensed') as total_prescriptions
     FROM prescriptions pr 
     JOIN checking_forms cf ON pr.checking_form_id = cf.id 
-    WHERE cf.patient_id = ?
+    WHERE cf.patient_id = ? AND pr.status = 'dispensed'
     ORDER BY pr.created_at DESC
 ");
 $prescriptions_stmt->execute([$patient_id]);
 $prescriptions = $prescriptions_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get lab tests data
+// Get lab tests with their ACTUAL prices from payments table
 $lab_tests_stmt = $pdo->prepare("
     SELECT 
         lt.id,
         lt.test_type as name,
         lt.results as instructions,
         'completed' as status,
-        lt.created_at
+        lt.created_at,
+        COALESCE(
+            (SELECT lab_amount FROM payments 
+             WHERE checking_form_id = cf.id AND payment_type = 'medicine_and_lab' 
+             ORDER BY id DESC LIMIT 1),
+            (SELECT amount FROM payments 
+             WHERE checking_form_id = cf.id AND payment_type = 'lab' 
+             ORDER BY id DESC LIMIT 1),
+            0
+        ) as total_lab_amount,
+        (SELECT COUNT(*) FROM laboratory_tests lt2 
+         WHERE lt2.checking_form_id = cf.id AND lt2.status = 'completed') as total_lab_tests
     FROM laboratory_tests lt 
     JOIN checking_forms cf ON lt.checking_form_id = cf.id 
     WHERE cf.patient_id = ? AND lt.status = 'completed'
@@ -79,55 +91,48 @@ $lab_tests_stmt = $pdo->prepare("
 $lab_tests_stmt->execute([$patient_id]);
 $lab_tests = $lab_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Calculate totals based on payment types
+// Get payment details for this patient
+$payment_stmt = $pdo->prepare("
+    SELECT 
+        amount,
+        medicine_amount,
+        lab_amount,
+        payment_type,
+        status,
+        created_at
+    FROM payments 
+    WHERE patient_id = ? AND checking_form_id = ? 
+    ORDER BY created_at DESC 
+    LIMIT 1
+");
+$payment_stmt->execute([$patient_id, $checking_form_id]);
+$payment = $payment_stmt->fetch(PDO::FETCH_ASSOC);
+
+// Calculate individual prices based on ACTUAL payment data
 $medicine_total = 0;
 $lab_total = 0;
-$combined_total = 0;
+$grand_total = 0;
 
-// Check for different payment types
-foreach ($all_payments as $payment) {
-    switch ($payment['payment_type']) {
-        case 'medicine':
-            $medicine_total += $payment['amount'];
-            break;
-        case 'lab_test':
-            $lab_total += $payment['amount'];
-            break;
-        case 'medicine_and_lab':
-            $combined_total += $payment['amount'];
-            break;
-    }
-}
-
-// If we have combined payment, use that as the main total
-if ($combined_total > 0) {
-    $grand_total = $combined_total;
-    // Distribute combined amount between medicine and lab for display
-    $total_items = count($prescriptions) + count($lab_tests);
-    if ($total_items > 0) {
-        $medicine_total = ($combined_total * count($prescriptions)) / $total_items;
-        $lab_total = ($combined_total * count($lab_tests)) / $total_items;
-    }
-} else {
-    $grand_total = $medicine_total + $lab_total;
-}
-
-// Combine all data into items array with proper pricing
-$items = [];
-
-// Process prescriptions with prices
+// Process prescriptions with individual pricing
+$prescriptions_with_prices = [];
 foreach ($prescriptions as $prescription) {
     $price = 0;
     
-    if ($combined_total > 0) {
-        // Distribute combined payment equally among prescriptions
-        $price = count($prescriptions) > 0 ? $medicine_total / count($prescriptions) : 0;
-    } else {
-        // Use individual medicine payments
-        $price = count($prescriptions) > 0 ? $medicine_total / count($prescriptions) : 0;
+    if ($payment) {
+        if ($payment['payment_type'] === 'medicine_and_lab' && $payment['medicine_amount'] > 0) {
+            // For combined payments, divide medicine amount equally among prescriptions
+            $price = $prescription['total_prescriptions'] > 0 
+                ? $payment['medicine_amount'] / $prescription['total_prescriptions'] 
+                : 0;
+        } elseif ($payment['payment_type'] === 'medicine' && $payment['amount'] > 0) {
+            // For medicine-only payments, divide equally among prescriptions
+            $price = $prescription['total_prescriptions'] > 0 
+                ? $payment['amount'] / $prescription['total_prescriptions'] 
+                : 0;
+        }
     }
     
-    $items[] = [
+    $prescriptions_with_prices[] = [
         'type' => 'medicine',
         'id' => $prescription['id'],
         'name' => $prescription['name'],
@@ -139,21 +144,30 @@ foreach ($prescriptions as $prescription) {
         'price' => $price,
         'created_at' => $prescription['created_at']
     ];
+    
+    $medicine_total += $price;
 }
 
-// Process lab tests with prices
+// Process lab tests with individual pricing
+$lab_tests_with_prices = [];
 foreach ($lab_tests as $lab_test) {
     $price = 0;
     
-    if ($combined_total > 0) {
-        // Distribute combined payment equally among lab tests
-        $price = count($lab_tests) > 0 ? $lab_total / count($lab_tests) : 0;
-    } else {
-        // Use individual lab payments
-        $price = count($lab_tests) > 0 ? $lab_total / count($lab_tests) : 0;
+    if ($payment) {
+        if ($payment['payment_type'] === 'medicine_and_lab' && $payment['lab_amount'] > 0) {
+            // For combined payments, divide lab amount equally among lab tests
+            $price = $lab_test['total_lab_tests'] > 0 
+                ? $payment['lab_amount'] / $lab_test['total_lab_tests'] 
+                : 0;
+        } elseif ($payment['payment_type'] === 'lab' && $payment['amount'] > 0) {
+            // For lab-only payments, divide equally among lab tests
+            $price = $lab_test['total_lab_tests'] > 0 
+                ? $payment['amount'] / $lab_test['total_lab_tests'] 
+                : 0;
+        }
     }
     
-    $items[] = [
+    $lab_tests_with_prices[] = [
         'type' => 'lab_test',
         'id' => $lab_test['id'],
         'name' => $lab_test['name'],
@@ -165,29 +179,48 @@ foreach ($lab_tests as $lab_test) {
         'price' => $price,
         'created_at' => $lab_test['created_at']
     ];
+    
+    $lab_total += $price;
 }
 
-// Sort items by creation date
-usort($items, function($a, $b) {
-    return strtotime($b['created_at']) - strtotime($a['created_at']);
-});
+// Combine all items
+$items = array_merge($prescriptions_with_prices, $lab_tests_with_prices);
 
-// Count items by type
-$medicine_count = count($prescriptions);
-$lab_count = count($lab_tests);
+// Calculate grand total
+if ($payment) {
+    if ($payment['payment_type'] === 'medicine_and_lab') {
+        $grand_total = $payment['amount'];
+        $medicine_total = $payment['medicine_amount'] ?? 0;
+        $lab_total = $payment['lab_amount'] ?? 0;
+    } else {
+        $grand_total = $payment['amount'];
+    }
+} else {
+    $grand_total = $medicine_total + $lab_total;
+}
+
+// Count items
+$medicine_count = count($prescriptions_with_prices);
+$lab_count = count($lab_tests_with_prices);
 $total_items = $medicine_count + $lab_count;
 
-// Debug information (remove in production)
-$debug_info = [
-    'patient_id' => $patient_id,
-    'checking_form_id' => $checking_form_id,
-    'payments_found' => count($all_payments),
-    'medicine_payments' => array_filter($all_payments, fn($p) => $p['payment_type'] === 'medicine'),
-    'lab_payments' => array_filter($all_payments, fn($p) => $p['payment_type'] === 'lab_test'),
-    'combined_payments' => array_filter($all_payments, fn($p) => $p['payment_type'] === 'medicine_and_lab'),
-    'prescriptions_count' => $medicine_count,
-    'lab_tests_count' => $lab_count
-];
+// Payment type display
+$payment_type_display = 'No Payment Record';
+if ($payment) {
+    switch ($payment['payment_type']) {
+        case 'medicine_and_lab':
+            $payment_type_display = 'COMBINED PAYMENT (MEDICINE & LABORATORY)';
+            break;
+        case 'medicine':
+            $payment_type_display = 'MEDICINE PAYMENT ONLY';
+            break;
+        case 'lab':
+            $payment_type_display = 'LABORATORY PAYMENT ONLY';
+            break;
+        default:
+            $payment_type_display = strtoupper(str_replace('_', ' ', $payment['payment_type']));
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -219,10 +252,37 @@ $debug_info = [
         
         /* Header */
         .header {
-            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             margin-bottom: 15px;
             padding-bottom: 10px;
             border-bottom: 2px solid #333;
+        }
+        
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .logo {
+            width: 60px;
+            height: 60px;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #10b981;
+        }
+        
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .clinic-info {
+            text-align: center;
+            flex: 1;
         }
         
         .clinic-name {
@@ -546,6 +606,10 @@ $debug_info = [
             .page-break {
                 page-break-before: always;
             }
+            
+            .logo {
+                border: 2px solid #10b981 !important;
+            }
         }
         
         /* Empty State */
@@ -566,18 +630,15 @@ $debug_info = [
             line-height: 1.3;
         }
         
-        /* Debug info (remove in production) */
-        .debug-info {
-            background: #fff3cd;
-            padding: 10px;
-            border-radius: 4px;
-            border: 1px solid #ffc107;
-            margin-bottom: 15px;
-            font-size: 10px;
-            display: none; /* Set to block to see debug info */
+        /* Price breakdown */
+        .price-breakdown {
+            font-size: 9px;
+            color: #666;
+            font-style: italic;
         }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+     <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
     <div class="action-buttons no-print">
@@ -590,25 +651,28 @@ $debug_info = [
     </div>
 
     <div class="print-container">
-        <!-- Debug Information (Remove in production) -->
-        <div class="debug-info" style="display: none;">
-            <strong>Debug Information:</strong><br>
-            <pre><?php echo json_encode($debug_info, JSON_PRETTY_PRINT); ?></pre>
-        </div>
-
-        <!-- Header -->
+        <!-- Header with Logo -->
         <div class="header">
-            <div class="clinic-name">ALMAJYD DISPENSARY</div>
-            <div class="clinic-address">TOMONDO - ZANZIBAR | Tel: +255 777 567 478</div>
-            <div class="document-title">MEDICAL TREATMENT REPORT</div>
+            <div class="logo-section">
+                <div class="logo">
+                    <img src="../images/logo.jpg" alt="Almajyd Dispensary Logo">
+                </div>
+            </div>
+            <div class="clinic-info">
+                <div class="clinic-name">ALMAJYD DISPENSARY</div>
+                <div class="clinic-address">TOMONDO - ZANZIBAR | Tel: +255 777 567 478</div>
+                <div class="document-title">MEDICAL TREATMENT REPORT</div>
+            </div>
+            <div style="width: 60px;"></div> <!-- Spacer for balance -->
         </div>
 
         <!-- Payment Information -->
-        <?php if ($combined_total > 0): ?>
+        <?php if ($payment): ?>
         <div class="payment-info">
-            <div class="payment-type">COMBINED PAYMENT (MEDICINE & LABORATORY)</div>
+            <div class="payment-type"><?php echo $payment_type_display; ?></div>
             <div class="payment-details">
-                Total Combined Amount: TSh <?php echo number_format($combined_total, 2); ?>
+                Payment Status: <strong><?php echo strtoupper($payment['status']); ?></strong> | 
+                Date: <?php echo date('M j, Y', strtotime($payment['created_at'])); ?>
             </div>
         </div>
         <?php endif; ?>
@@ -745,13 +809,24 @@ $debug_info = [
         <div class="footer">
             <!-- Total Amounts Breakdown -->
             <div class="total-section">
-                <?php if ($combined_total > 0): ?>
+                <?php if ($payment && $payment['payment_type'] === 'medicine_and_lab'): ?>
                     <div class="total-row">
-                        <span class="total-label">Combined Payment (Medicine & Lab):</span>
-                        <span class="total-amount">TSh <?php echo number_format($combined_total, 2); ?></span>
+                        <span class="total-label">Medicines Total (<?php echo $medicine_count; ?> items):</span>
+                        <span class="total-amount">TSh <?php echo number_format($medicine_total, 2); ?></span>
                     </div>
-                    <div class="total-row" style="font-size: 9px; color: #666; font-style: italic;">
-                        <span>Note: Combined amount distributed between <?php echo $medicine_count; ?> medicines and <?php echo $lab_count; ?> lab tests</span>
+                    <div class="total-row">
+                        <span class="total-label">Laboratory Tests Total (<?php echo $lab_count; ?> tests):</span>
+                        <span class="total-amount">TSh <?php echo number_format($lab_total, 2); ?></span>
+                    </div>
+                <?php elseif ($payment && $payment['payment_type'] === 'medicine'): ?>
+                    <div class="total-row">
+                        <span class="total-label">Medicines Total (<?php echo $medicine_count; ?> items):</span>
+                        <span class="total-amount">TSh <?php echo number_format($medicine_total, 2); ?></span>
+                    </div>
+                <?php elseif ($payment && $payment['payment_type'] === 'lab'): ?>
+                    <div class="total-row">
+                        <span class="total-label">Laboratory Tests Total (<?php echo $lab_count; ?> tests):</span>
+                        <span class="total-amount">TSh <?php echo number_format($lab_total, 2); ?></span>
                     </div>
                 <?php else: ?>
                     <div class="total-row">
@@ -768,6 +843,12 @@ $debug_info = [
                     <span class="total-label">GRAND TOTAL:</span>
                     <span class="total-amount">TSh <?php echo number_format($grand_total, 2); ?></span>
                 </div>
+
+                <?php if ($payment && $payment['payment_type'] === 'medicine_and_lab'): ?>
+                    <div class="total-row price-breakdown">
+                        <span>Note: Combined payment distributed equally among items</span>
+                    </div>
+                <?php endif; ?>
             </div>
 
             <!-- Signatures -->

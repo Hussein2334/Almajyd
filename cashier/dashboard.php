@@ -16,235 +16,334 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'cashier') {
 $success_message = '';
 $error_message = '';
 
-// Handle Update Profile
-if (isset($_POST['update_profile'])) {
-    $full_name = $_POST['full_name'] ?? '';
-    $email = $_POST['email'] ?? '';
-    $phone = $_POST['phone'] ?? '';
+// Handle Update Profile Information
+if (isset($_POST['update_profile_info'])) {
+    $full_name = trim($_POST['full_name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $phone = trim($_POST['phone'] ?? '');
+    
+    // Validate inputs
+    if (empty($full_name)) {
+        $error_message = "Full name is required!";
+    } else {
+        try {
+            // Update basic profile info
+            $stmt = $pdo->prepare("UPDATE users SET full_name = ?, email = ?, phone = ? WHERE id = ?");
+            $stmt->execute([$full_name, $email, $phone, $_SESSION['user_id']]);
+            
+            // Update session
+            $_SESSION['full_name'] = $full_name;
+            
+            $success_message = "Profile updated successfully!";
+            
+        } catch (PDOException $e) {
+            $error_message = "Error updating profile: " . $e->getMessage();
+        }
+    }
+}
+
+// Handle Change Password
+if (isset($_POST['change_password'])) {
     $current_password = $_POST['current_password'] ?? '';
     $new_password = $_POST['new_password'] ?? '';
     $confirm_password = $_POST['confirm_password'] ?? '';
     
-    try {
-        // Update basic profile info
-        $stmt = $pdo->prepare("UPDATE users SET full_name = ?, email = ?, phone = ? WHERE id = ?");
-        $stmt->execute([$full_name, $email, $phone, $_SESSION['user_id']]);
-        
-        // Update password if provided
-        if (!empty($current_password) && !empty($new_password)) {
-            if ($new_password !== $confirm_password) {
-                $error_message = "New passwords do not match!";
+    // Validate password fields
+    if (empty($current_password) || empty($new_password) || empty($confirm_password)) {
+        $error_message = "All password fields are required!";
+    } elseif ($new_password !== $confirm_password) {
+        $error_message = "New passwords do not match!";
+    } elseif (strlen($new_password) < 6) {
+        $error_message = "New password must be at least 6 characters long!";
+    } else {
+        try {
+            // Verify current password
+            $user_stmt = $pdo->prepare("SELECT password FROM users WHERE id = ?");
+            $user_stmt->execute([$_SESSION['user_id']]);
+            $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($user && password_verify($current_password, $user['password'])) {
+                $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+                $pwd_stmt = $pdo->prepare("UPDATE users SET password = ? WHERE id = ?");
+                $pwd_stmt->execute([$hashed_password, $_SESSION['user_id']]);
+                $success_message = "Password changed successfully!";
             } else {
-                // Verify current password
-                $user_stmt = $pdo->prepare("SELECT password FROM users WHERE id = ?");
-                $user_stmt->execute([$_SESSION['user_id']]);
-                $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
-                
-                if ($user && password_verify($current_password, $user['password'])) {
-                    $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                    $pwd_stmt = $pdo->prepare("UPDATE users SET password = ? WHERE id = ?");
-                    $pwd_stmt->execute([$hashed_password, $_SESSION['user_id']]);
-                    $success_message = "Profile and password updated successfully!";
-                } else {
-                    $error_message = "Current password is incorrect!";
-                }
+                $error_message = "Current password is incorrect!";
             }
-        } else {
-            $success_message = "Profile updated successfully!";
+            
+        } catch (PDOException $e) {
+            $error_message = "Error changing password: " . $e->getMessage();
         }
-        
-        // Update session
-        $_SESSION['full_name'] = $full_name;
-        
-    } catch (PDOException $e) {
-        $error_message = "Error updating profile: " . $e->getMessage();
     }
 }
 
-// Handle Add Price and Generate Payment
-if (isset($_POST['add_price'])) {
-    $prescription_id = $_POST['prescription_id'];
-    $price = $_POST['price'] ?? 0;
-    $payment_method = $_POST['payment_method'] ?? 'cash';
-    $payment_status = $_POST['payment_status'] ?? 'pending';
+// Handle Payment Processing
+if (isset($_POST['process_payment'])) {
+    $payment_id = $_POST['payment_id'];
+    $payment_method = $_POST['payment_method'];
+    $amount_paid = $_POST['amount_paid'];
+    $transaction_id = $_POST['transaction_id'] ?? '';
+    $notes = $_POST['notes'] ?? '';
     
     try {
-        // Start transaction
         $pdo->beginTransaction();
         
-        // Get patient_id and checking_form_id from prescription
-        $prescription_stmt = $pdo->prepare("
-            SELECT cf.patient_id, pr.checking_form_id 
-            FROM prescriptions pr 
-            JOIN checking_forms cf ON pr.checking_form_id = cf.id 
-            WHERE pr.id = ?
+        // Get payment details with consultation fee
+        $payment_stmt = $pdo->prepare("
+            SELECT p.*, pt.consultation_fee 
+            FROM payments p 
+            JOIN patients pt ON p.patient_id = pt.id 
+            WHERE p.id = ?
         ");
-        $prescription_stmt->execute([$prescription_id]);
-        $prescription_data = $prescription_stmt->fetch(PDO::FETCH_ASSOC);
+        $payment_stmt->execute([$payment_id]);
+        $payment = $payment_stmt->fetch(PDO::FETCH_ASSOC);
         
-        if ($prescription_data) {
-            $patient_id = $prescription_data['patient_id'];
-            $checking_form_id = $prescription_data['checking_form_id'];
+        if ($payment) {
+            $consultation_fee = $payment['consultation_fee'] ?? 0;
+            $total_amount = $payment['amount'] + $consultation_fee;
             
-            // Create payment record
-            $payment_stmt = $pdo->prepare("
-                INSERT INTO payments (patient_id, checking_form_id, amount, payment_type, status, processed_by) 
-                VALUES (?, ?, ?, ?, ?, ?)
+            // Check if paid amount matches
+            if (floatval($amount_paid) >= floatval($total_amount)) {
+                // Update payment status
+                $update_stmt = $pdo->prepare("
+                    UPDATE payments 
+                    SET status = 'paid', 
+                        payment_method = ?,
+                        amount_paid = ?,
+                        transaction_id = ?,
+                        notes = CONCAT(COALESCE(notes, ''), ' | PAID: ', ?),
+                        paid_at = NOW(),
+                        processed_by = ?
+                    WHERE id = ?
+                ");
+                $update_stmt->execute([
+                    $payment_method,
+                    $amount_paid,
+                    $transaction_id,
+                    $notes,
+                    $_SESSION['user_id'],
+                    $payment_id
+                ]);
+                
+                // Create receipt
+                $receipt_stmt = $pdo->prepare("
+                    INSERT INTO receipts (payment_id, receipt_number, total_amount, amount_paid, change_amount, issued_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ");
+                $receipt_number = 'RCP' . date('Ymd') . str_pad($payment_id, 4, '0', STR_PAD_LEFT);
+                $change_amount = floatval($amount_paid) - floatval($total_amount);
+                
+                $receipt_stmt->execute([
+                    $payment_id,
+                    $receipt_number,
+                    $total_amount,
+                    $amount_paid,
+                    $change_amount,
+                    $_SESSION['user_id']
+                ]);
+                
+                $success_message = "Payment processed successfully! Receipt #: " . $receipt_number;
+                
+                if ($change_amount > 0) {
+                    $success_message .= "<br>Change Amount: TSh " . number_format($change_amount, 2);
+                }
+                
+            } else {
+                $error_message = "Paid amount is less than total amount!";
+            }
+        } else {
+            $error_message = "Payment record not found!";
+        }
+        
+        $pdo->commit();
+        
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        $error_message = "Error processing payment: " . $e->getMessage();
+    }
+}
+
+// Handle Cancel Payment
+if (isset($_POST['cancel_payment'])) {
+    $payment_id = $_POST['payment_id'];
+    $cancellation_reason = $_POST['cancellation_reason'] ?? '';
+    
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE payments 
+            SET status = 'cancelled', 
+                notes = CONCAT(COALESCE(notes, ''), ' | CANCELLED: ', ?),
+                processed_by = ?
+            WHERE id = ?
+        ");
+        $stmt->execute([$cancellation_reason, $_SESSION['user_id'], $payment_id]);
+        
+        $success_message = "Payment cancelled successfully!";
+        
+    } catch (PDOException $e) {
+        $error_message = "Error cancelling payment: " . $e->getMessage();
+    }
+}
+
+// Handle Refund Payment
+if (isset($_POST['refund_payment'])) {
+    $payment_id = $_POST['payment_id'];
+    $refund_amount = $_POST['refund_amount'];
+    $refund_reason = $_POST['refund_reason'] ?? '';
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // Get payment details
+        $payment_stmt = $pdo->prepare("SELECT * FROM payments WHERE id = ?");
+        $payment_stmt->execute([$payment_id]);
+        $payment = $payment_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($payment && $payment['status'] == 'paid') {
+            // Create refund record
+            $refund_stmt = $pdo->prepare("
+                INSERT INTO refunds (payment_id, refund_amount, refund_reason, processed_by)
+                VALUES (?, ?, ?, ?)
             ");
-            $payment_stmt->execute([
-                $patient_id, 
-                $checking_form_id, 
-                $price, 
-                $payment_method, 
-                $payment_status, 
+            $refund_stmt->execute([
+                $payment_id,
+                $refund_amount,
+                $refund_reason,
                 $_SESSION['user_id']
             ]);
             
-            $payment_id = $pdo->lastInsertId();
+            // Update payment status to refunded
+            $update_stmt = $pdo->prepare("
+                UPDATE payments 
+                SET status = 'refunded',
+                    notes = CONCAT(COALESCE(notes, ''), ' | REFUNDED: ', ?),
+                    processed_by = ?
+                WHERE id = ?
+            ");
+            $update_stmt->execute([$refund_reason, $_SESSION['user_id'], $payment_id]);
             
-            // Update prescription to mark as priced (using cashier_id column if exists, otherwise just update)
-            try {
-                $update_stmt = $pdo->prepare("UPDATE prescriptions SET cashier_id = ? WHERE id = ?");
-                $update_stmt->execute([$_SESSION['user_id'], $prescription_id]);
-            } catch (PDOException $e) {
-                // If cashier_id column doesn't exist, just continue
-                error_log("Cashier_id column may not exist: " . $e->getMessage());
-            }
+            $success_message = "Refund processed successfully! Refund Amount: TSh " . number_format($refund_amount, 2);
             
-            $pdo->commit();
-            $success_message = "Price added and payment record created successfully!";
         } else {
-            throw new Exception("Prescription data not found");
+            $error_message = "Payment not found or not eligible for refund!";
         }
         
-    } catch (Exception $e) {
+        $pdo->commit();
+        
+    } catch (PDOException $e) {
         $pdo->rollBack();
-        $error_message = "Error adding price: " . $e->getMessage();
+        $error_message = "Error processing refund: " . $e->getMessage();
     }
 }
 
-// Handle Complete Payment
-if (isset($_POST['complete_payment'])) {
+// Handle Edit Payment Amount
+if (isset($_POST['edit_payment_amount'])) {
     $payment_id = $_POST['payment_id'];
+    $new_medicine_amount = $_POST['new_medicine_amount'];
+    $new_lab_amount = $_POST['new_lab_amount'];
+    $reason = $_POST['reason'] ?? '';
     
     try {
-        $stmt = $pdo->prepare("UPDATE payments SET status = 'paid' WHERE id = ?");
-        $stmt->execute([$payment_id]);
+        $new_total_amount = $new_medicine_amount + $new_lab_amount;
         
-        $success_message = "Payment marked as completed successfully!";
+        $stmt = $pdo->prepare("
+            UPDATE payments 
+            SET amount = ?, 
+                medicine_amount = ?, 
+                lab_amount = ?,
+                notes = CONCAT(COALESCE(notes, ''), ' | AMOUNT ADJUSTED: ', ?),
+                processed_by = ?
+            WHERE id = ?
+        ");
+        $stmt->execute([
+            $new_total_amount,
+            $new_medicine_amount,
+            $new_lab_amount,
+            $reason,
+            $_SESSION['user_id'],
+            $payment_id
+        ]);
         
-        // Refresh page to update status
-        header("Location: ".$_SERVER['PHP_SELF']);
-        exit;
+        $success_message = "Payment amount updated successfully!";
+        
     } catch (PDOException $e) {
-        $error_message = "Error completing payment: " . $e->getMessage();
+        $error_message = "Error updating payment amount: " . $e->getMessage();
     }
 }
 
 // Get statistics for dashboard
-$total_patients = $pdo->query("SELECT COUNT(*) as total FROM patients")->fetch(PDO::FETCH_ASSOC)['total'];
-$today_patients = $pdo->query("SELECT COUNT(*) as total FROM patients WHERE DATE(created_at) = CURDATE()")->fetch(PDO::FETCH_ASSOC)['total'];
-$total_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions")->fetch(PDO::FETCH_ASSOC)['total'];
-
-// Get unpriced prescriptions (dispensed but no payment record)
-$unpriced_prescriptions = $pdo->query("
-    SELECT COUNT(*) as total 
-    FROM prescriptions pr 
-    WHERE pr.status = 'dispensed' 
-    AND NOT EXISTS (
-        SELECT 1 FROM payments p 
-        JOIN checking_forms cf ON p.checking_form_id = cf.id 
-        WHERE cf.id = pr.checking_form_id
-    )
-")->fetch(PDO::FETCH_ASSOC)['total'];
-
-// Get pending payments
+$total_payments = $pdo->query("SELECT COUNT(*) as total FROM payments")->fetch(PDO::FETCH_ASSOC)['total'];
 $pending_payments = $pdo->query("SELECT COUNT(*) as total FROM payments WHERE status = 'pending'")->fetch(PDO::FETCH_ASSOC)['total'];
-
-// Get completed payments
 $completed_payments = $pdo->query("SELECT COUNT(*) as total FROM payments WHERE status = 'paid'")->fetch(PDO::FETCH_ASSOC)['total'];
+$cancelled_payments = $pdo->query("SELECT COUNT(*) as total FROM payments WHERE status = 'cancelled'")->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Get unpriced prescriptions list (dispensed but no payment record) - FIXED QUERY
-$unpriced_prescriptions_list = $pdo->query("
-    SELECT 
-        pr.*, 
-        p.full_name as patient_name, 
-        p.card_no, 
-        p.age, 
-        p.gender,
-        u.full_name as doctor_name,
-        cf.diagnosis,
-        cf.id as checking_form_id
-    FROM prescriptions pr 
-    JOIN checking_forms cf ON pr.checking_form_id = cf.id 
-    JOIN patients p ON cf.patient_id = p.id 
-    JOIN users u ON cf.doctor_id = u.id 
-    WHERE pr.status = 'dispensed' 
-    AND NOT EXISTS (
-        SELECT 1 FROM payments pmt 
-        WHERE pmt.checking_form_id = cf.id
-    )
-    ORDER BY pr.created_at DESC
-")->fetchAll(PDO::FETCH_ASSOC);
+// Get revenue statistics
+$total_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'")->fetch(PDO::FETCH_ASSOC)['total'];
+$pending_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'pending'")->fetch(PDO::FETCH_ASSOC)['total'];
+$today_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(created_at) = CURDATE() AND status = 'paid'")->fetch(PDO::FETCH_ASSOC)['total'];
+$today_payments = $pdo->query("SELECT COUNT(*) as total FROM payments WHERE DATE(created_at) = CURDATE() AND status = 'paid'")->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Get pending payments list - FIXED QUERY
+// Get pending payments with patient details
 $pending_payments_list = $pdo->query("
     SELECT 
-        pmt.*,
-        p.full_name as patient_name, 
-        p.card_no, 
-        p.age, 
-        p.gender,
-        pr.medicine_name,
+        p.*,
+        pt.full_name as patient_name,
+        pt.card_no,
+        pt.age,
+        pt.gender,
+        pt.phone,
+        pt.consultation_fee,
         u.full_name as doctor_name,
-        cf.diagnosis
-    FROM payments pmt
-    JOIN patients p ON pmt.patient_id = p.id
-    JOIN checking_forms cf ON pmt.checking_form_id = cf.id
-    JOIN prescriptions pr ON cf.id = pr.checking_form_id
+        cf.diagnosis,
+        cf.symptoms,
+        (SELECT GROUP_CONCAT(CONCAT(pr.medicine_name, ' (', pr.dosage, ')') SEPARATOR ', ') 
+         FROM prescriptions pr 
+         WHERE pr.checking_form_id = p.checking_form_id AND pr.status = 'dispensed') as medications,
+        (SELECT GROUP_CONCAT(CONCAT(lt.test_type, ': ', lt.results) SEPARATOR ' | ') 
+         FROM laboratory_tests lt 
+         WHERE lt.checking_form_id = p.checking_form_id AND lt.status = 'completed') as lab_tests
+    FROM payments p
+    JOIN patients pt ON p.patient_id = pt.id
+    JOIN checking_forms cf ON p.checking_form_id = cf.id
     JOIN users u ON cf.doctor_id = u.id
-    WHERE pmt.status = 'pending'
-    ORDER BY pmt.created_at DESC
+    WHERE p.status = 'pending'
+    ORDER BY p.created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get completed payments list - FIXED QUERY
-$completed_payments_list = $pdo->query("
+// Get completed payments for today
+$today_completed_payments = $pdo->query("
     SELECT 
-        pmt.*,
-        p.full_name as patient_name, 
-        p.card_no, 
-        p.age, 
-        p.gender,
-        pr.medicine_name,
-        u.full_name as doctor_name,
-        c.full_name as cashier_name,
-        cf.diagnosis
-    FROM payments pmt
-    JOIN patients p ON pmt.patient_id = p.id
-    JOIN checking_forms cf ON pmt.checking_form_id = cf.id
-    JOIN prescriptions pr ON cf.id = pr.checking_form_id
-    JOIN users u ON cf.doctor_id = u.id
-    LEFT JOIN users c ON pmt.processed_by = c.id
-    WHERE pmt.status = 'paid'
-    ORDER BY pmt.created_at DESC 
-    LIMIT 20
+        p.*,
+        pt.full_name as patient_name,
+        pt.card_no,
+        pt.consultation_fee,
+        r.receipt_number,
+        p.payment_method,
+        p.amount_paid,
+        p.paid_at
+    FROM payments p
+    JOIN patients pt ON p.patient_id = pt.id
+    LEFT JOIN receipts r ON p.id = r.payment_id
+    WHERE DATE(p.paid_at) = CURDATE() AND p.status = 'paid'
+    ORDER BY p.paid_at DESC
+    LIMIT 10
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get recent payments (invoices) - FIXED QUERY
-$recent_invoices = $pdo->query("
+// Get all payments for management
+$all_payments = $pdo->query("
     SELECT 
-        pmt.*,
-        pr.medicine_name,
-        p.full_name as patient_name,
-        p.card_no,
-        u.full_name as cashier_name
-    FROM payments pmt
-    JOIN patients p ON pmt.patient_id = p.id
-    JOIN checking_forms cf ON pmt.checking_form_id = cf.id
-    JOIN prescriptions pr ON cf.id = pr.checking_form_id
-    JOIN users u ON pmt.processed_by = u.id
-    ORDER BY pmt.created_at DESC
-    LIMIT 15
+        p.*,
+        pt.full_name as patient_name,
+        pt.card_no,
+        pt.consultation_fee,
+        r.receipt_number,
+        u.full_name as processed_by_name
+    FROM payments p
+    JOIN patients pt ON p.patient_id = pt.id
+    LEFT JOIN receipts r ON p.id = r.payment_id
+    LEFT JOIN users u ON p.processed_by = u.id
+    ORDER BY p.created_at DESC
+    LIMIT 50
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // Get current user data
@@ -311,7 +410,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             border-radius: 10px;
             overflow: hidden;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            border: 3px solid #10b981;
+            border: 3px solid #3b82f6;
         }
         
         .logo img {
@@ -341,7 +440,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         }
         
         .time-display {
-            background: linear-gradient(135deg, #10b981, #059669);
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
             color: white;
             padding: 8px 15px;
             border-radius: 25px;
@@ -364,7 +463,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         .user-avatar {
             width: 40px;
             height: 40px;
-            background: #10b981;
+            background: #3b82f6;
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -478,24 +577,28 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             box-shadow: 0 8px 30px rgba(0,0,0,0.12);
         }
         
-        .stat-card.patients { border-left-color: #3b82f6; }
-        .stat-card.today { border-left-color: #10b981; }
-        .stat-card.total-rx { border-left-color: #8b5cf6; }
-        .stat-card.unpriced { border-left-color: #10b981; }
-        .stat-card.pending-payment { border-left-color: #ef4444; }
-        .stat-card.completed-payment { border-left-color: #10b981; }
+        .stat-card.payments { border-left-color: #3b82f6; }
+        .stat-card.pending { border-left-color: #f59e0b; }
+        .stat-card.completed { border-left-color: #10b981; }
+        .stat-card.cancelled { border-left-color: #ef4444; }
+        .stat-card.revenue { border-left-color: #10b981; }
+        .stat-card.pending-revenue { border-left-color: #f59e0b; }
+        .stat-card.today-revenue { border-left-color: #3b82f6; }
+        .stat-card.today-payments { border-left-color: #8b5cf6; }
         
         .stat-icon {
             font-size: 2.2em;
             margin-bottom: 10px;
         }
         
-        .stat-card.patients .stat-icon { color: #3b82f6; }
-        .stat-card.today .stat-icon { color: #10b981; }
-        .stat-card.total-rx .stat-icon { color: #8b5cf6; }
-        .stat-card.unpriced .stat-icon { color: #10b981; }
-        .stat-card.pending-payment .stat-icon { color: #ef4444; }
-        .stat-card.completed-payment .stat-icon { color: #10b981; }
+        .stat-card.payments .stat-icon { color: #3b82f6; }
+        .stat-card.pending .stat-icon { color: #f59e0b; }
+        .stat-card.completed .stat-icon { color: #10b981; }
+        .stat-card.cancelled .stat-icon { color: #ef4444; }
+        .stat-card.revenue .stat-icon { color: #10b981; }
+        .stat-card.pending-revenue .stat-icon { color: #f59e0b; }
+        .stat-card.today-revenue .stat-icon { color: #3b82f6; }
+        .stat-card.today-payments .stat-icon { color: #8b5cf6; }
         
         .stat-number {
             font-size: 2.2em;
@@ -547,7 +650,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         }
         
         .tab.active {
-            background: #10b981;
+            background: #3b82f6;
             color: white;
         }
         
@@ -618,31 +721,31 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         
         .form-input:focus, .form-select:focus, .form-textarea:focus {
             outline: none;
-            border-color: #10b981;
-            box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
         }
         
         .btn {
-            padding: 8px 16px;
+            padding: 12px 20px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             text-decoration: none;
-            font-weight: 500;
-            font-size: 0.85rem;
+            font-weight: 600;
+            font-size: 0.9rem;
             transition: all 0.3s ease;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
             cursor: pointer;
         }
         
         .btn-primary {
-            background: #10b981;
+            background: #3b82f6;
             color: white;
         }
         
         .btn-primary:hover {
-            background: #059669;
+            background: #2563eb;
             transform: translateY(-2px);
         }
         
@@ -667,12 +770,12 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         }
         
         .btn-info {
-            background: #3b82f6;
+            background: #06b6d4;
             color: white;
         }
         
         .btn-info:hover {
-            background: #2563eb;
+            background: #0891b2;
             transform: translateY(-2px);
         }
         
@@ -685,22 +788,33 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             background: #dc2626;
             transform: translateY(-2px);
         }
+        
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+            transform: translateY(-2px);
+        }
 
         /* Cards Grid */
         .cards-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(700px, 1fr));
+            gap: 25px;
             margin-top: 20px;
         }
         
         .card {
             background: white;
-            padding: 20px;
+            padding: 25px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
             border-left: 4px solid;
             transition: all 0.3s ease;
+            position: relative;
         }
         
         .card:hover {
@@ -708,46 +822,46 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             box-shadow: 0 8px 25px rgba(0,0,0,0.12);
         }
         
-        .card.prescription { border-left-color: #10b981; }
-        .card.payment { border-left-color: #ef4444; }
+        .card.pending { border-left-color: #f59e0b; }
         .card.completed { border-left-color: #10b981; }
-        .card.invoice { border-left-color: #3b82f6; }
+        .card.cancelled { border-left-color: #ef4444; }
+        .card.patient { border-left-color: #3b82f6; }
         
         .card-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
         
         .card-title {
             font-weight: bold;
             color: #1e293b;
-            font-size: 1.1rem;
+            font-size: 1.2rem;
         }
         
         .card-status {
-            padding: 4px 12px;
+            padding: 6px 15px;
             border-radius: 20px;
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             font-weight: 600;
             text-transform: uppercase;
         }
         
-        .status-unpriced { background: #d1fae5; color: #065f46; }
-        .status-pending { background: #fee2e2; color: #991b1b; }
-        .status-paid { background: #d1fae5; color: #065f46; }
-        .status-dispensed { background: #dbeafe; color: #1e40af; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-completed { background: #d1fae5; color: #065f46; }
+        .status-cancelled { background: #fee2e2; color: #991b1b; }
+        .status-refunded { background: #f3e8ff; color: #7c3aed; }
         
         .card-info {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
         
         .info-row {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 8px;
-            font-size: 0.9rem;
+            margin-bottom: 10px;
+            font-size: 0.95rem;
         }
         
         .info-label {
@@ -762,45 +876,90 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         
         .card-description {
             background: #f8fafc;
-            padding: 12px;
+            padding: 15px;
             border-radius: 8px;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
             font-size: 0.9rem;
             color: #475569;
+            line-height: 1.5;
+        }
+        
+        .amount-section {
+            background: #f0f9ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .amount-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 1rem;
+        }
+        
+        .amount-total {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #1e40af;
+            border-top: 2px solid #3b82f6;
+            padding-top: 10px;
+            margin-top: 10px;
         }
         
         .card-actions {
             display: flex;
-            gap: 10px;
+            gap: 12px;
             flex-wrap: wrap;
+            margin-top: 20px;
         }
 
-        /* Price Form */
-        .price-form {
-            background: #ecfdf5;
-            border: 2px solid #d1fae5;
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 15px;
+        /* Payment Form */
+        .payment-form {
+            background: #f1f5f9;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            border-left: 4px solid #3b82f6;
         }
         
-        .price-form .form-group {
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
             margin-bottom: 15px;
         }
         
-        .price-input-group {
+        .payment-methods {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .payment-method {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
         }
         
-        .currency-symbol {
-            font-weight: bold;
-            color: #065f46;
+        .payment-method:hover {
+            border-color: #3b82f6;
         }
         
-        .price-input {
-            flex: 1;
+        .payment-method.selected {
+            border-color: #3b82f6;
+            background: #dbeafe;
+        }
+        
+        .payment-method input[type="radio"] {
+            margin: 0;
         }
 
         /* Tables */
@@ -826,14 +985,14 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         /* Action Buttons */
         .action-buttons {
             display: flex;
-            gap: 5px;
+            gap: 8px;
             flex-wrap: wrap;
         }
         
         .btn-sm {
-            padding: 4px 8px;
-            font-size: 0.75rem;
-            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            border-radius: 6px;
         }
 
         /* DataTables Custom Styling */
@@ -872,8 +1031,8 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         }
         
         .dataTables_paginate .paginate_button.current {
-            background: #10b981 !important;
-            border-color: #10b981 !important;
+            background: #3b82f6 !important;
+            border-color: #3b82f6 !important;
             color: white !important;
         }
         
@@ -884,17 +1043,18 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
 
         /* Badges */
         .badge {
-            padding: 4px 8px;
+            padding: 6px 12px;
             border-radius: 12px;
-            font-size: 0.7rem;
+            font-size: 0.75rem;
             font-weight: 600;
         }
         
         .badge-success { background: #d1fae5; color: #065f46; }
         .badge-warning { background: #fef3c7; color: #92400e; }
-        .badge-danger { background: #fee2e2; color: #991b1b; }
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-primary { background: #d1fae5; color: #065f46; }
+        .badge-danger { background: #fee2e2; color: #991b1b; }
+        .badge-purple { background: #f3e8ff; color: #7c3aed; }
 
         /* Table responsive container */
         .table-responsive {
@@ -917,7 +1077,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         .empty-state i {
             font-size: 4em;
             margin-bottom: 20px;
-            color: #10b981;
+            color: #3b82f6;
             opacity: 0.7;
         }
         
@@ -930,6 +1090,55 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             font-size: 0.9rem;
             max-width: 400px;
             margin: 0 auto;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.3);
+            position: relative;
+            animation: modalSlideIn 0.3s ease;
+        }
+        
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .close {
+            position: absolute;
+            right: 20px;
+            top: 15px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #64748b;
+        }
+        
+        .close:hover {
+            color: #374151;
         }
 
         /* MOBILE RESPONSIVE DESIGN */
@@ -999,9 +1208,18 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 flex-direction: column;
             }
             
-            .price-input-group {
-                flex-direction: column;
-                align-items: stretch;
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .payment-methods {
+                grid-template-columns: 1fr;
+            }
+            
+            .modal-content {
+                width: 95%;
+                margin: 10% auto;
+                padding: 20px;
             }
         }
         
@@ -1020,9 +1238,40 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 justify-content: center;
             }
         }
+
+        /* AJAX Form Submission Styles */
+        .form-submitting {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        
+        .btn-loading {
+            position: relative;
+            color: transparent !important;
+        }
+        
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-right-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-     <link rel="icon" href="../images/logo.jpg">
+    <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
 
@@ -1081,68 +1330,82 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
 
         <!-- Quick Statistics -->
         <div class="stats-grid">
-            <div class="stat-card patients">
+            <div class="stat-card payments">
                 <div class="stat-icon">
-                    <i class="fas fa-users"></i>
+                    <i class="fas fa-money-bill-wave"></i>
                 </div>
-                <div class="stat-number"><?php echo $total_patients; ?></div>
-                <div class="stat-label">Total Patients</div>
+                <div class="stat-number"><?php echo $total_payments; ?></div>
+                <div class="stat-label">Total Payments</div>
             </div>
-            <div class="stat-card today">
-                <div class="stat-icon">
-                    <i class="fas fa-calendar-day"></i>
-                </div>
-                <div class="stat-number"><?php echo $today_patients; ?></div>
-                <div class="stat-label">Today's Patients</div>
-            </div>
-            <div class="stat-card total-rx">
-                <div class="stat-icon">
-                    <i class="fas fa-prescription"></i>
-                </div>
-                <div class="stat-number"><?php echo $total_prescriptions; ?></div>
-                <div class="stat-label">Total Prescriptions</div>
-            </div>
-            <div class="stat-card unpriced">
-                <div class="stat-icon">
-                    <i class="fas fa-tag"></i>
-                </div>
-                <div class="stat-number"><?php echo $unpriced_prescriptions; ?></div>
-                <div class="stat-label">Unpriced Prescriptions</div>
-            </div>
-            <div class="stat-card pending-payment">
+            <div class="stat-card pending">
                 <div class="stat-icon">
                     <i class="fas fa-clock"></i>
                 </div>
                 <div class="stat-number"><?php echo $pending_payments; ?></div>
                 <div class="stat-label">Pending Payments</div>
             </div>
-            <div class="stat-card completed-payment">
+            <div class="stat-card completed">
                 <div class="stat-icon">
                     <i class="fas fa-check-circle"></i>
                 </div>
                 <div class="stat-number"><?php echo $completed_payments; ?></div>
                 <div class="stat-label">Completed Payments</div>
             </div>
+            <div class="stat-card cancelled">
+                <div class="stat-icon">
+                    <i class="fas fa-times-circle"></i>
+                </div>
+                <div class="stat-number"><?php echo $cancelled_payments; ?></div>
+                <div class="stat-label">Cancelled Payments</div>
+            </div>
+            <div class="stat-card revenue">
+                <div class="stat-icon">
+                    <i class="fas fa-chart-line"></i>
+                </div>
+                <div class="stat-number">TSh <?php echo number_format($total_revenue, 0); ?></div>
+                <div class="stat-label">Total Revenue</div>
+            </div>
+            <div class="stat-card pending-revenue">
+                <div class="stat-icon">
+                    <i class="fas fa-hourglass-half"></i>
+                </div>
+                <div class="stat-number">TSh <?php echo number_format($pending_revenue, 0); ?></div>
+                <div class="stat-label">Pending Revenue</div>
+            </div>
+            <div class="stat-card today-revenue">
+                <div class="stat-icon">
+                    <i class="fas fa-calendar-day"></i>
+                </div>
+                <div class="stat-number">TSh <?php echo number_format($today_revenue, 0); ?></div>
+                <div class="stat-label">Today's Revenue</div>
+            </div>
+            <div class="stat-card today-payments">
+                <div class="stat-icon">
+                    <i class="fas fa-receipt"></i>
+                </div>
+                <div class="stat-number"><?php echo $today_payments; ?></div>
+                <div class="stat-label">Today's Payments</div>
+            </div>
         </div>
 
         <!-- Tabs Navigation -->
         <div class="tabs-container">
             <div class="tabs">
-                <button class="tab active" onclick="showTab('unpriced')">
-                    <i class="fas fa-tag"></i>
-                    Add Prices (<?php echo $unpriced_prescriptions; ?>)
-                </button>
-                <button class="tab" onclick="showTab('pending')">
+                <button class="tab active" onclick="showTab('pending')">
                     <i class="fas fa-clock"></i>
-                    Pending Payments (<?php echo $pending_payments; ?>)
+                    Pending Payments (<?php echo count($pending_payments_list); ?>)
                 </button>
-                <button class="tab" onclick="showTab('completed')">
-                    <i class="fas fa-check-circle"></i>
-                    Completed Payments (<?php echo $completed_payments; ?>)
+                <button class="tab" onclick="showTab('today')">
+                    <i class="fas fa-calendar-day"></i>
+                    Today's Payments (<?php echo count($today_completed_payments); ?>)
                 </button>
-                <button class="tab" onclick="showTab('invoices')">
-                    <i class="fas fa-receipt"></i>
-                    Recent Invoices
+                <button class="tab" onclick="showTab('all')">
+                    <i class="fas fa-list"></i>
+                    All Payments (<?php echo count($all_payments); ?>)
+                </button>
+                <button class="tab" onclick="showTab('print')">
+                    <i class="fas fa-print"></i>
+                    Print Receipt
                 </button>
                 <button class="tab" onclick="showTab('profile')">
                     <i class="fas fa-user-cog"></i>
@@ -1150,164 +1413,177 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 </button>
             </div>
 
-            <!-- Unpriced Prescriptions Tab -->
-            <div id="unpriced-tab" class="tab-content active">
-                <h3 style="color: #1e293b; margin-bottom: 20px;">
-                    <i class="fas fa-tag"></i> Add Prices to Dispensed Prescriptions
-                </h3>
-                
-                <?php if (empty($unpriced_prescriptions_list)): ?>
-                    <div class="empty-state">
-                        <i class="fas fa-check-circle"></i>
-                        <h4>No Unpriced Prescriptions</h4>
-                        <p>All dispensed prescriptions have been priced.</p>
-                    </div>
-                <?php else: ?>
-                    <div class="cards-grid">
-                        <?php foreach ($unpriced_prescriptions_list as $prescription): ?>
-                        <div class="card prescription">
-                            <div class="card-header">
-                                <div class="card-title"><?php echo htmlspecialchars($prescription['medicine_name']); ?></div>
-                                <div class="card-status status-unpriced">Needs Pricing</div>
-                            </div>
-                            
-                            <div class="card-info">
-                                <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($prescription['patient_name']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Card No:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($prescription['card_no']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Age/Gender:</span>
-                                    <span class="info-value"><?php echo $prescription['age'] . ' yrs / ' . ucfirst($prescription['gender']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Prescribed by:</span>
-                                    <span class="info-value">Dr. <?php echo htmlspecialchars($prescription['doctor_name']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Dispensed Date:</span>
-                                    <span class="info-value"><?php echo date('M j, Y H:i', strtotime($prescription['created_at'])); ?></span>
-                                </div>
-                            </div>
-                            
-                            <div class="card-description">
-                                <strong>Medication Details:</strong><br>
-                                <strong>Dosage:</strong> <?php echo htmlspecialchars($prescription['dosage'] ?? 'Not specified'); ?><br>
-                                <strong>Frequency:</strong> <?php echo htmlspecialchars($prescription['frequency'] ?? 'Not specified'); ?><br>
-                                <strong>Duration:</strong> <?php echo htmlspecialchars($prescription['duration'] ?? 'Not specified'); ?>
-                            </div>
-                            
-                            <?php if (!empty($prescription['diagnosis'])): ?>
-                            <div class="card-description">
-                                <strong>Diagnosis:</strong><br>
-                                <?php echo htmlspecialchars($prescription['diagnosis']); ?>
-                            </div>
-                            <?php endif; ?>
-                            
-                            <div class="price-form">
-                                <form method="POST" action="">
-                                    <input type="hidden" name="prescription_id" value="<?php echo $prescription['id']; ?>">
-                                    
-                                    <div class="form-group">
-                                        <label class="form-label">Enter Price (TZS)</label>
-                                        <div class="price-input-group">
-                                            <span class="currency-symbol">TZS</span>
-                                            <input type="number" name="price" class="form-input price-input" placeholder="0.00" min="0" step="0.01" required>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label class="form-label">Payment Method</label>
-                                        <select name="payment_method" class="form-select" required>
-                                            <option value="cash">Cash</option>
-                                            <option value="card">Card</option>
-                                            <option value="insurance">Insurance</option>
-                                            <option value="mobile">Mobile Money</option>
-                                        </select>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label class="form-label">Payment Status</label>
-                                        <select name="payment_status" class="form-select" required>
-                                            <option value="pending">Pending Payment</option>
-                                            <option value="paid">Paid Now</option>
-                                        </select>
-                                    </div>
-                                    
-                                    <button type="submit" name="add_price" class="btn btn-success">
-                                        <i class="fas fa-save"></i> Save Price & Generate Payment
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-            </div>
-
             <!-- Pending Payments Tab -->
-            <div id="pending-tab" class="tab-content">
+            <div id="pending-tab" class="tab-content active">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
-                    <i class="fas fa-clock"></i> Pending Payments
+                    <i class="fas fa-clock"></i> Pending Payments - Verify & Process
                 </h3>
                 
                 <?php if (empty($pending_payments_list)): ?>
                     <div class="empty-state">
                         <i class="fas fa-check-circle"></i>
                         <h4>No Pending Payments</h4>
-                        <p>All payments have been completed.</p>
+                        <p>All payments have been processed successfully.</p>
                     </div>
                 <?php else: ?>
                     <div class="cards-grid">
-                        <?php foreach ($pending_payments_list as $payment): ?>
-                        <div class="card payment">
+                        <?php foreach ($pending_payments_list as $payment): 
+                            $consultation_fee = $payment['consultation_fee'] ?? 0;
+                            $total_amount = $payment['amount'] + $consultation_fee;
+                        ?>
+                        <div class="card pending">
                             <div class="card-header">
-                                <div class="card-title"><?php echo htmlspecialchars($payment['medicine_name']); ?></div>
-                                <div class="card-status status-pending">Payment Pending</div>
+                                <div class="card-title"><?php echo htmlspecialchars($payment['patient_name']); ?></div>
+                                <div class="card-status status-pending">
+                                    Pending Payment
+                                </div>
                             </div>
                             
                             <div class="card-info">
-                                <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($payment['patient_name']); ?></span>
-                                </div>
                                 <div class="info-row">
                                     <span class="info-label">Card No:</span>
                                     <span class="info-value"><?php echo htmlspecialchars($payment['card_no']); ?></span>
                                 </div>
                                 <div class="info-row">
-                                    <span class="info-label">Amount:</span>
-                                    <span class="info-value" style="color: #ef4444; font-size: 1.1em;">
-                                        TZS <?php echo number_format($payment['amount'], 2); ?>
-                                    </span>
+                                    <span class="info-label">Age/Gender:</span>
+                                    <span class="info-value"><?php echo $payment['age'] . ' yrs / ' . ucfirst($payment['gender']); ?></span>
                                 </div>
                                 <div class="info-row">
-                                    <span class="info-label">Payment Method:</span>
-                                    <span class="info-value"><?php echo ucfirst($payment['payment_type']); ?></span>
+                                    <span class="info-label">Phone:</span>
+                                    <span class="info-value"><?php echo $payment['phone'] ?: 'N/A'; ?></span>
                                 </div>
                                 <div class="info-row">
-                                    <span class="info-label">Payment ID:</span>
-                                    <span class="info-value">PMT-<?php echo str_pad($payment['id'], 6, '0', STR_PAD_LEFT); ?></span>
+                                    <span class="info-label">Doctor:</span>
+                                    <span class="info-value">Dr. <?php echo htmlspecialchars($payment['doctor_name']); ?></span>
                                 </div>
                             </div>
                             
-                            <div class="card-actions">
-                                <form method="POST" action="" style="display: inline;">
+                            <?php if (!empty($payment['diagnosis'])): ?>
+                            <div class="card-description">
+                                <strong>Diagnosis:</strong><br>
+                                <?php echo htmlspecialchars($payment['diagnosis']); ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($payment['symptoms'])): ?>
+                            <div class="card-description">
+                                <strong>Symptoms:</strong><br>
+                                <?php echo htmlspecialchars($payment['symptoms']); ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($payment['medications'])): ?>
+                            <div class="card-description">
+                                <strong>Medications:</strong><br>
+                                <?php echo htmlspecialchars($payment['medications']); ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <?php if (!empty($payment['lab_tests'])): ?>
+                            <div class="card-description">
+                                <strong>Lab Tests:</strong><br>
+                                <?php echo htmlspecialchars($payment['lab_tests']); ?>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <!-- Amount Section - UPDATED TO INCLUDE CONSULTATION FEE -->
+                            <div class="amount-section">
+                                <h5 style="margin-bottom: 15px; color: #1e40af;">
+                                    <i class="fas fa-money-bill"></i> Payment Summary
+                                </h5>
+                                <div class="amount-row">
+                                    <span>Consultation Fee:</span>
+                                    <span>TSh <?php echo number_format($consultation_fee, 2); ?></span>
+                                </div>
+                                <div class="amount-row">
+                                    <span>Medicine Amount:</span>
+                                    <span>TSh <?php echo number_format($payment['medicine_amount'], 2); ?></span>
+                                </div>
+                                <div class="amount-row">
+                                    <span>Lab Amount:</span>
+                                    <span>TSh <?php echo number_format($payment['lab_amount'], 2); ?></span>
+                                </div>
+                                <div class="amount-row amount-total">
+                                    <span>Total Amount:</span>
+                                    <span>TSh <?php echo number_format($total_amount, 2); ?></span>
+                                </div>
+                            </div>
+                            
+                            <!-- Payment Processing Form -->
+                            <div class="payment-form">
+                                <h5 style="margin-bottom: 15px; color: #1e293b;">
+                                    <i class="fas fa-credit-card"></i> Process Payment
+                                </h5>
+                                
+                                <form method="POST" action="" id="paymentForm_<?php echo $payment['id']; ?>" class="ajax-form">
                                     <input type="hidden" name="payment_id" value="<?php echo $payment['id']; ?>">
-                                    <button type="submit" name="complete_payment" class="btn btn-success">
-                                        <i class="fas fa-check"></i> Mark as Paid
-                                    </button>
+                                    <input type="hidden" name="total_amount" value="<?php echo $total_amount; ?>">
+                                    
+                                    <div class="form-group">
+                                        <label class="form-label">Payment Method *</label>
+                                        <div class="payment-methods">
+                                            <label class="payment-method" onclick="selectPaymentMethod(this, <?php echo $payment['id']; ?>)">
+                                                <input type="radio" name="payment_method" value="cash" required>
+                                                <i class="fas fa-money-bill-wave"></i>
+                                                <span>Cash</span>
+                                            </label>
+                                            <label class="payment-method" onclick="selectPaymentMethod(this, <?php echo $payment['id']; ?>)">
+                                                <input type="radio" name="payment_method" value="card" required>
+                                                <i class="fas fa-credit-card"></i>
+                                                <span>Card</span>
+                                            </label>
+                                            <label class="payment-method" onclick="selectPaymentMethod(this, <?php echo $payment['id']; ?>)">
+                                                <input type="radio" name="payment_method" value="mobile" required>
+                                                <i class="fas fa-mobile-alt"></i>
+                                                <span>Mobile Money</span>
+                                            </label>
+                                            <label class="payment-method" onclick="selectPaymentMethod(this, <?php echo $payment['id']; ?>)">
+                                                <input type="radio" name="payment_method" value="bank" required>
+                                                <i class="fas fa-university"></i>
+                                                <span>Bank Transfer</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label class="form-label">Amount Paid (TSh) *</label>
+                                            <input type="number" name="amount_paid" class="form-input" 
+                                                min="<?php echo $total_amount; ?>" 
+                                                step="0.01" 
+                                                value="<?php echo $total_amount; ?>" 
+                                                required
+                                                onchange="calculateChange(<?php echo $payment['id']; ?>, <?php echo $total_amount; ?>)">
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label class="form-label">Transaction ID (Optional)</label>
+                                            <input type="text" name="transaction_id" class="form-input" placeholder="e.g., TXN123456">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label class="form-label">Notes (Optional)</label>
+                                        <textarea name="notes" class="form-textarea" placeholder="Additional notes..."></textarea>
+                                    </div>
+                                    
+                                    <div id="changeDisplay_<?php echo $payment['id']; ?>" class="amount-row" style="display: none; background: #d1fae5; padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+                                        <span><strong>Change Amount:</strong></span>
+                                        <span id="changeAmount_<?php echo $payment['id']; ?>" style="color: #065f46; font-weight: bold;"></span>
+                                    </div>
+                                    
+                                    <div class="card-actions">
+                                        <button type="submit" name="process_payment" class="btn btn-success">
+                                            <i class="fas fa-check-circle"></i> Process Payment
+                                        </button>
+                                        <button type="button" class="btn btn-warning" onclick="openEditAmountModal(<?php echo $payment['id']; ?>, <?php echo $payment['medicine_amount']; ?>, <?php echo $payment['lab_amount']; ?>)">
+                                            <i class="fas fa-edit"></i> Edit Amount
+                                        </button>
+                                        <button type="button" class="btn btn-danger" onclick="openCancelModal(<?php echo $payment['id']; ?>)">
+                                            <i class="fas fa-times"></i> Cancel Payment
+                                        </button>
+                                    </div>
                                 </form>
-                                <button class="btn btn-primary" onclick="printInvoice(<?php echo $payment['id']; ?>)">
-                                    <i class="fas fa-print"></i> Print Invoice
-                                </button>
-                                <button class="btn btn-info" onclick="viewPaymentDetails(<?php echo $payment['id']; ?>)">
-                                    <i class="fas fa-eye"></i> View Details
-                                </button>
                             </div>
                         </div>
                         <?php endforeach; ?>
@@ -1315,124 +1591,60 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 <?php endif; ?>
             </div>
 
-            <!-- Completed Payments Tab -->
-            <div id="completed-tab" class="tab-content">
+            <!-- Today's Payments Tab -->
+            <div id="today-tab" class="tab-content">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
-                    <i class="fas fa-check-circle"></i> Completed Payments
+                    <i class="fas fa-calendar-day"></i> Today's Completed Payments
                 </h3>
                 
-                <?php if (empty($completed_payments_list)): ?>
+                <?php if (empty($today_completed_payments)): ?>
                     <div class="empty-state">
                         <i class="fas fa-receipt"></i>
-                        <h4>No Completed Payments</h4>
-                        <p>No payments have been completed yet.</p>
-                    </div>
-                <?php else: ?>
-                    <div class="cards-grid">
-                        <?php foreach ($completed_payments_list as $payment): ?>
-                        <div class="card completed">
-                            <div class="card-header">
-                                <div class="card-title"><?php echo htmlspecialchars($payment['medicine_name']); ?></div>
-                                <div class="card-status status-paid">Paid</div>
-                            </div>
-                            
-                            <div class="card-info">
-                                <div class="info-row">
-                                    <span class="info-label">Patient:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($payment['patient_name']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Card No:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($payment['card_no']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Amount Paid:</span>
-                                    <span class="info-value" style="color: #10b981; font-size: 1.1em;">
-                                        TZS <?php echo number_format($payment['amount'], 2); ?>
-                                    </span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Payment Method:</span>
-                                    <span class="info-value"><?php echo ucfirst($payment['payment_type']); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Processed by:</span>
-                                    <span class="info-value"><?php echo htmlspecialchars($payment['cashier_name'] ?? 'N/A'); ?></span>
-                                </div>
-                                <div class="info-row">
-                                    <span class="info-label">Paid Date:</span>
-                                    <span class="info-value"><?php echo date('M j, Y H:i', strtotime($payment['created_at'])); ?></span>
-                                </div>
-                            </div>
-                            
-                            <div class="card-actions">
-                                <button class="btn btn-primary" onclick="printInvoice(<?php echo $payment['id']; ?>)">
-                                    <i class="fas fa-print"></i> Print Invoice
-                                </button>
-                                <button class="btn btn-info" onclick="viewPaymentDetails(<?php echo $payment['id']; ?>)">
-                                    <i class="fas fa-eye"></i> View Details
-                                </button>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-            </div>
-
-            <!-- Invoices Tab -->
-            <div id="invoices-tab" class="tab-content">
-                <h3 style="color: #1e293b; margin-bottom: 20px;">
-                    <i class="fas fa-receipt"></i> Recent Payments/Invoices
-                </h3>
-                
-                <?php if (empty($recent_invoices)): ?>
-                    <div class="empty-state">
-                        <i class="fas fa-file-invoice"></i>
-                        <h4>No Payments Found</h4>
-                        <p>No payments have been processed yet.</p>
+                        <h4>No Payments Today</h4>
+                        <p>No payments have been processed today.</p>
                     </div>
                 <?php else: ?>
                     <div class="table-card">
                         <div class="table-responsive">
-                            <table class="table table-striped table-hover" id="invoicesTable" style="width:100%">
+                            <table class="table table-striped table-hover" id="todayPaymentsTable" style="width:100%">
                                 <thead>
                                     <tr>
-                                        <th>Payment #</th>
+                                        <th>Receipt No</th>
                                         <th>Patient</th>
-                                        <th>Card No</th>
-                                        <th>Medicine</th>
-                                        <th>Amount</th>
+                                        <th>Total Amount</th>
+                                        <th>Amount Paid</th>
                                         <th>Payment Method</th>
-                                        <th>Status</th>
-                                        <th>Cashier</th>
-                                        <th>Date</th>
+                                        <th>Time</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($recent_invoices as $invoice): ?>
+                                    <?php foreach ($today_completed_payments as $payment): 
+                                        $total_amount = $payment['amount'] + ($payment['consultation_fee'] ?? 0);
+                                    ?>
                                     <tr>
-                                        <td><strong>PMT-<?php echo str_pad($invoice['id'], 6, '0', STR_PAD_LEFT); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($invoice['patient_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($invoice['card_no']); ?></td>
-                                        <td><?php echo htmlspecialchars($invoice['medicine_name']); ?></td>
-                                        <td style="font-weight: bold; color: #10b981;">
-                                            TZS <?php echo number_format($invoice['amount'], 2); ?>
+                                        <td>
+                                            <strong><?php echo $payment['receipt_number'] ?? 'N/A'; ?></strong>
                                         </td>
                                         <td>
-                                            <span class="badge badge-info"><?php echo ucfirst($invoice['payment_type']); ?></span>
+                                            <strong><?php echo htmlspecialchars($payment['patient_name']); ?></strong><br>
+                                            <small><?php echo htmlspecialchars($payment['card_no']); ?></small>
                                         </td>
+                                        <td>TSh <?php echo number_format($total_amount, 2); ?></td>
+                                        <td>TSh <?php echo number_format($payment['amount_paid'], 2); ?></td>
                                         <td>
-                                            <span class="badge <?php echo $invoice['status'] == 'paid' ? 'badge-success' : 'badge-warning'; ?>">
-                                                <?php echo ucfirst($invoice['status']); ?>
+                                            <span class="badge badge-info">
+                                                <?php echo ucfirst($payment['payment_method']); ?>
                                             </span>
                                         </td>
-                                        <td><?php echo htmlspecialchars($invoice['cashier_name']); ?></td>
-                                        <td><?php echo date('M j, Y', strtotime($invoice['created_at'])); ?></td>
+                                        <td><?php echo date('H:i', strtotime($payment['paid_at'])); ?></td>
                                         <td>
                                             <div class="action-buttons">
-                                                <button class="btn btn-primary btn-sm" onclick="printInvoice(<?php echo $invoice['id']; ?>)">
+                                                <a href="receipt.php?payment_id=<?php echo $payment['id']; ?>" target="_blank" class="btn btn-primary btn-sm">
                                                     <i class="fas fa-print"></i> Print
+                                                </a>
+                                                <button class="btn btn-warning btn-sm" onclick="openRefundModal(<?php echo $payment['id']; ?>, <?php echo $payment['amount_paid']; ?>)">
+                                                    <i class="fas fa-undo"></i> Refund
                                                 </button>
                                             </div>
                                         </td>
@@ -1445,7 +1657,149 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 <?php endif; ?>
             </div>
 
-            <!-- Profile Settings Tab -->
+            <!-- All Payments Tab -->
+            <div id="all-tab" class="tab-content">
+                <h3 style="color: #1e293b; margin-bottom: 20px;">
+                    <i class="fas fa-list"></i> All Payments Management
+                </h3>
+                
+                <div class="table-card">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover" id="allPaymentsTable" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Patient</th>
+                                    <th>Consultation</th>
+                                    <th>Medicine</th>
+                                    <th>Lab</th>
+                                    <th>Total Amount</th>
+                                    <th>Status</th>
+                                    <th>Payment Method</th>
+                                    <th>Date</th>
+                                    <th>Processed By</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($all_payments as $payment): 
+                                    $total_amount = $payment['amount'] + ($payment['consultation_fee'] ?? 0);
+                                ?>
+                                <tr>
+                                    <td><strong>#<?php echo $payment['id']; ?></strong></td>
+                                    <td>
+                                        <strong><?php echo htmlspecialchars($payment['patient_name']); ?></strong><br>
+                                        <small><?php echo htmlspecialchars($payment['card_no']); ?></small>
+                                    </td>
+                                    <td>TSh <?php echo number_format($payment['consultation_fee'] ?? 0, 2); ?></td>
+                                    <td>TSh <?php echo number_format($payment['medicine_amount'], 2); ?></td>
+                                    <td>TSh <?php echo number_format($payment['lab_amount'], 2); ?></td>
+                                    <td><strong>TSh <?php echo number_format($total_amount, 2); ?></strong></td>
+                                    <td>
+                                        <span class="badge <?php 
+                                            echo $payment['status'] == 'paid' ? 'badge-success' : 
+                                                 ($payment['status'] == 'pending' ? 'badge-warning' : 
+                                                 ($payment['status'] == 'cancelled' ? 'badge-danger' : 'badge-purple')); 
+                                        ?>">
+                                            <?php echo ucfirst($payment['status']); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <?php if ($payment['payment_method']): ?>
+                                        <span class="badge badge-info">
+                                            <?php echo ucfirst($payment['payment_method']); ?>
+                                        </span>
+                                        <?php else: ?>
+                                        <span class="badge badge-secondary">N/A</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo date('M j, Y', strtotime($payment['created_at'])); ?></td>
+                                    <td>
+                                        <?php echo $payment['processed_by_name'] ? htmlspecialchars($payment['processed_by_name']) : 'N/A'; ?>
+                                    </td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <?php if ($payment['status'] == 'pending'): ?>
+                                                <button class="btn btn-success btn-sm" onclick="processPayment(<?php echo $payment['id']; ?>)">
+                                                    <i class="fas fa-check"></i> Process
+                                                </button>
+                                            <?php elseif ($payment['status'] == 'paid'): ?>
+                                                <a href="receipt.php?payment_id=<?php echo $payment['id']; ?>" target="_blank" class="btn btn-primary btn-sm">
+                                                    <i class="fas fa-print"></i> Print
+                                                </a>
+                                            <?php endif; ?>
+                                            <button class="btn btn-info btn-sm" onclick="viewPaymentDetails(<?php echo $payment['id']; ?>)">
+                                                <i class="fas fa-eye"></i> View
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Print Receipt Tab -->
+            <div id="print-tab" class="tab-content">
+                <h3 style="color: #1e293b; margin-bottom: 20px;">
+                    <i class="fas fa-print"></i> Print Receipt
+                </h3>
+                
+                <div class="form-card">
+                    <h4><i class="fas fa-search"></i> Search Payment for Receipt</h4>
+                    <form method="GET" action="receipt.php" target="_blank">
+                        <div class="form-group">
+                            <label class="form-label">Payment ID *</label>
+                            <input type="number" name="payment_id" class="form-input" placeholder="Enter payment ID" required>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-print"></i> View & Print Receipt
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Quick Access to Recent Payments -->
+                <div class="form-card" style="margin-top: 20px;">
+                    <h4><i class="fas fa-history"></i> Recent Payments</h4>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>Payment ID</th>
+                                    <th>Patient</th>
+                                    <th>Amount</th>
+                                    <th>Date</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php 
+                                $recent_payments = array_slice($all_payments, 0, 10);
+                                foreach ($recent_payments as $payment): 
+                                    $total_amount = $payment['amount'] + ($payment['consultation_fee'] ?? 0);
+                                ?>
+                                <tr>
+                                    <td><strong>#<?php echo $payment['id']; ?></strong></td>
+                                    <td><?php echo htmlspecialchars($payment['patient_name']); ?></td>
+                                    <td>TSh <?php echo number_format($total_amount, 2); ?></td>
+                                    <td><?php echo date('M j, Y', strtotime($payment['created_at'])); ?></td>
+                                    <td>
+                                        <a href="receipt.php?payment_id=<?php echo $payment['id']; ?>" target="_blank" class="btn btn-primary btn-sm">
+                                            <i class="fas fa-print"></i> Print
+                                        </a>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Settings Tab - FIXED VERSION -->
             <div id="profile-tab" class="tab-content">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
                     <i class="fas fa-user-cog"></i> Profile Settings
@@ -1454,7 +1808,9 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 <div class="form-grid">
                     <div class="form-card">
                         <h4><i class="fas fa-user-edit"></i> Personal Information</h4>
-                        <form method="POST" action="">
+                        <form method="POST" action="" id="profileForm">
+                            <input type="hidden" name="update_profile_info" value="1">
+                            
                             <div class="form-group">
                                 <label class="form-label">Full Name *</label>
                                 <input type="text" name="full_name" class="form-input" value="<?php echo $current_full_name; ?>" required>
@@ -1470,7 +1826,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                 <input type="tel" name="phone" class="form-input" value="<?php echo $current_phone; ?>" placeholder="Enter phone number">
                             </div>
                             
-                            <button type="submit" name="update_profile" class="btn btn-primary">
+                            <button type="submit" class="btn btn-primary">
                                 <i class="fas fa-save"></i> Update Profile
                             </button>
                         </form>
@@ -1478,23 +1834,25 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
 
                     <div class="form-card">
                         <h4><i class="fas fa-key"></i> Change Password</h4>
-                        <form method="POST" action="">
+                        <form method="POST" action="" id="passwordForm">
+                            <input type="hidden" name="change_password" value="1">
+                            
                             <div class="form-group">
-                                <label class="form-label">Current Password</label>
-                                <input type="password" name="current_password" class="form-input" placeholder="Enter current password">
+                                <label class="form-label">Current Password *</label>
+                                <input type="password" name="current_password" class="form-input" placeholder="Enter current password" required>
                             </div>
                             
                             <div class="form-group">
-                                <label class="form-label">New Password</label>
-                                <input type="password" name="new_password" class="form-input" placeholder="Enter new password">
+                                <label class="form-label">New Password *</label>
+                                <input type="password" name="new_password" class="form-input" placeholder="Enter new password" required>
                             </div>
                             
                             <div class="form-group">
-                                <label class="form-label">Confirm New Password</label>
-                                <input type="password" name="confirm_password" class="form-input" placeholder="Confirm new password">
+                                <label class="form-label">Confirm New Password *</label>
+                                <input type="password" name="confirm_password" class="form-input" placeholder="Confirm new password" required>
                             </div>
                             
-                            <button type="submit" name="update_profile" class="btn btn-warning">
+                            <button type="submit" class="btn btn-warning">
                                 <i class="fas fa-key"></i> Change Password
                             </button>
                         </form>
@@ -1503,6 +1861,103 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             </div>
         </div>
 
+    </div>
+
+    <!-- Edit Amount Modal -->
+    <div id="editAmountModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('editAmountModal')">&times;</span>
+            <h3><i class="fas fa-edit"></i> Edit Payment Amount</h3>
+            <form method="POST" action="" id="editAmountForm" class="ajax-form">
+                <input type="hidden" name="payment_id" id="edit_payment_id">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Medicine Amount (TSh)</label>
+                        <input type="number" name="new_medicine_amount" id="edit_medicine_amount" class="form-input" min="0" step="0.01" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label">Lab Amount (TSh)</label>
+                        <input type="number" name="new_lab_amount" id="edit_lab_amount" class="form-input" min="0" step="0.01" required>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Reason for Edit</label>
+                    <input type="text" name="reason" class="form-input" placeholder="Reason for amount adjustment" required>
+                </div>
+                
+                <div class="amount-row" style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <span><strong>New Total Amount:</strong></span>
+                    <span id="new_total_amount" style="color: #1e40af; font-weight: bold; font-size: 1.1rem;">TSh 0.00</span>
+                </div>
+                
+                <div class="card-actions">
+                    <button type="submit" name="edit_payment_amount" class="btn btn-warning">
+                        <i class="fas fa-save"></i> Update Amount
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('editAmountModal')">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cancel Payment Modal -->
+    <div id="cancelModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('cancelModal')">&times;</span>
+            <h3><i class="fas fa-times-circle"></i> Cancel Payment</h3>
+            <form method="POST" action="" id="cancelForm" class="ajax-form">
+                <input type="hidden" name="payment_id" id="cancel_payment_id">
+                
+                <div class="form-group">
+                    <label class="form-label">Cancellation Reason *</label>
+                    <textarea name="cancellation_reason" class="form-textarea" placeholder="Please provide a reason for cancellation..." required></textarea>
+                </div>
+                
+                <div class="card-actions">
+                    <button type="submit" name="cancel_payment" class="btn btn-danger">
+                        <i class="fas fa-times"></i> Confirm Cancellation
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('cancelModal')">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Refund Modal -->
+    <div id="refundModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('refundModal')">&times;</span>
+            <h3><i class="fas fa-undo"></i> Process Refund</h3>
+            <form method="POST" action="" id="refundForm" class="ajax-form">
+                <input type="hidden" name="payment_id" id="refund_payment_id">
+                
+                <div class="form-group">
+                    <label class="form-label">Refund Amount (TSh) *</label>
+                    <input type="number" name="refund_amount" id="refund_amount" class="form-input" min="0.01" step="0.01" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Refund Reason *</label>
+                    <textarea name="refund_reason" class="form-textarea" placeholder="Please provide a reason for refund..." required></textarea>
+                </div>
+                
+                <div class="card-actions">
+                    <button type="submit" name="refund_payment" class="btn btn-warning">
+                        <i class="fas fa-undo"></i> Process Refund
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('refundModal')">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- JavaScript Libraries -->
@@ -1515,21 +1970,80 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
     <script>
         // Initialize DataTables
         $(document).ready(function() {
-            $('#invoicesTable').DataTable({
+            $('#todayPaymentsTable').DataTable({
                 responsive: true,
                 paging: true,
                 searching: true,
                 info: true,
                 ordering: true,
                 pageLength: 10,
-                order: [[8, 'desc']],
                 language: {
                     search: "Search payments:",
                     lengthMenu: "Show _MENU_ entries",
                     info: "Showing _START_ to _END_ of _TOTAL_ entries",
                     infoEmpty: "Showing 0 to 0 of 0 entries",
                     infoFiltered: "(filtered from _MAX_ total entries)"
-                }
+                },
+                order: [[5, 'desc']]
+            });
+
+            $('#allPaymentsTable').DataTable({
+                responsive: true,
+                paging: true,
+                searching: true,
+                info: true,
+                ordering: true,
+                pageLength: 10,
+                language: {
+                    search: "Search payments:",
+                    lengthMenu: "Show _MENU_ entries",
+                    info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                    infoEmpty: "Showing 0 to 0 of 0 entries",
+                    infoFiltered: "(filtered from _MAX_ total entries)"
+                },
+                order: [[0, 'desc']]
+            });
+
+            // AJAX Form Submission for payment forms
+            $('.ajax-form').on('submit', function(e) {
+                e.preventDefault();
+                var form = $(this);
+                var submitBtn = form.find('button[type="submit"]');
+                var originalText = submitBtn.html();
+                
+                // Show loading state
+                form.addClass('form-submitting');
+                submitBtn.addClass('btn-loading').prop('disabled', true);
+                
+                // Submit form via AJAX
+                $.ajax({
+                    url: '',
+                    type: 'POST',
+                    data: form.serialize(),
+                    success: function(response) {
+                        // Reload the page to show updated data
+                        location.reload();
+                    },
+                    error: function() {
+                        alert('Error occurred. Please try again.');
+                        form.removeClass('form-submitting');
+                        submitBtn.removeClass('btn-loading').prop('disabled', false).html(originalText);
+                    }
+                });
+            });
+
+            // Regular form submission for profile forms (non-AJAX)
+            $('#profileForm, #passwordForm').on('submit', function(e) {
+                var form = $(this);
+                var submitBtn = form.find('button[type="submit"]');
+                var originalText = submitBtn.html();
+                
+                // Show loading state
+                form.addClass('form-submitting');
+                submitBtn.addClass('btn-loading').prop('disabled', true);
+                
+                // Allow regular form submission for profile updates
+                // The page will reload with the updated data
             });
         });
 
@@ -1552,14 +2066,95 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             event.target.classList.add('active');
         }
 
-        // Function to print invoice
-        function printInvoice(paymentId) {
-            window.open('print_invoice.php?id=' + paymentId, '_blank');
+        // Function to select payment method
+        function selectPaymentMethod(element, paymentId) {
+            // Remove selected class from all payment methods in this form
+            const form = element.closest('form');
+            form.querySelectorAll('.payment-method').forEach(method => {
+                method.classList.remove('selected');
+            });
+            
+            // Add selected class to clicked method
+            element.classList.add('selected');
+            
+            // Check the radio button
+            const radio = element.querySelector('input[type="radio"]');
+            radio.checked = true;
+        }
+
+        // Function to calculate change
+        function calculateChange(paymentId, totalAmount) {
+            const form = document.getElementById('paymentForm_' + paymentId);
+            const amountPaid = parseFloat(form.querySelector('input[name="amount_paid"]').value) || 0;
+            
+            const changeDisplay = document.getElementById('changeDisplay_' + paymentId);
+            const changeAmount = document.getElementById('changeAmount_' + paymentId);
+            
+            if (amountPaid > totalAmount) {
+                const change = amountPaid - totalAmount;
+                changeAmount.textContent = 'TSh ' + change.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                changeDisplay.style.display = 'flex';
+            } else {
+                changeDisplay.style.display = 'none';
+            }
+        }
+
+        // Function to open edit amount modal
+        function openEditAmountModal(paymentId, medicineAmount, labAmount) {
+            document.getElementById('edit_payment_id').value = paymentId;
+            document.getElementById('edit_medicine_amount').value = medicineAmount;
+            document.getElementById('edit_lab_amount').value = labAmount;
+            updateNewTotalAmount();
+            document.getElementById('editAmountModal').style.display = 'block';
+        }
+
+        // Function to update new total amount in edit modal
+        function updateNewTotalAmount() {
+            const medicineAmount = parseFloat(document.getElementById('edit_medicine_amount').value) || 0;
+            const labAmount = parseFloat(document.getElementById('edit_lab_amount').value) || 0;
+            const totalAmount = medicineAmount + labAmount;
+            
+            document.getElementById('new_total_amount').textContent = 'TSh ' + totalAmount.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        // Function to open cancel modal
+        function openCancelModal(paymentId) {
+            document.getElementById('cancel_payment_id').value = paymentId;
+            document.getElementById('cancelModal').style.display = 'block';
+        }
+
+        // Function to open refund modal
+        function openRefundModal(paymentId, maxAmount) {
+            document.getElementById('refund_payment_id').value = paymentId;
+            document.getElementById('refund_amount').value = maxAmount;
+            document.getElementById('refund_amount').max = maxAmount;
+            document.getElementById('refundModal').style.display = 'block';
+        }
+
+        // Function to close modal
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        // Function to process payment (redirect to pending tab)
+        function processPayment(paymentId) {
+            showTab('pending');
+            // Scroll to the specific payment card
+            setTimeout(() => {
+                const element = document.getElementById('paymentForm_' + paymentId);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, 100);
         }
 
         // Function to view payment details
         function viewPaymentDetails(paymentId) {
-            alert('Viewing payment details: ' + paymentId);
+            alert('Viewing payment details for ID: ' + paymentId);
+            // You can implement a detailed view modal here
         }
 
         // Auto-remove alerts after 5 seconds
@@ -1585,12 +2180,29 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         updateTime();
         setInterval(updateTime, 60000);
 
-        // Auto-focus on price input when card is displayed
-        document.addEventListener('DOMContentLoaded', function() {
-            const priceInputs = document.querySelectorAll('.price-input');
-            priceInputs.forEach(input => {
-                input.focus();
+        // Event listeners for edit amount modal
+        document.getElementById('edit_medicine_amount').addEventListener('input', updateNewTotalAmount);
+        document.getElementById('edit_lab_amount').addEventListener('input', updateNewTotalAmount);
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
             });
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize change calculations for all pending payments
+            <?php foreach ($pending_payments_list as $payment): 
+                $consultation_fee = $payment['consultation_fee'] ?? 0;
+                $total_amount = $payment['amount'] + $consultation_fee;
+            ?>
+            calculateChange(<?php echo $payment['id']; ?>, <?php echo $total_amount; ?>);
+            <?php endforeach; ?>
         });
     </script>
 </body>

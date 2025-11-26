@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Nov 25, 2025 at 05:56 PM
+-- Generation Time: Nov 27, 2025 at 12:30 AM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -124,7 +124,10 @@ INSERT INTO `laboratory_tests` (`id`, `checking_form_id`, `test_type`, `test_des
 (17, 11, 'Typhoid Test', '', '', 'completed', 4, '2025-11-25 10:35:53', '2025-11-25 11:29:10'),
 (18, 6, 'Malaria Test', '', 'hana ', 'completed', 4, '2025-11-25 10:38:03', '2025-11-25 10:57:16'),
 (19, 6, 'Pregnancy Test', '', 'anayo ', 'completed', 4, '2025-11-25 10:38:03', '2025-11-25 10:57:32'),
-(20, 8, 'X-Ray', '', NULL, 'pending', 4, '2025-11-25 14:44:26', '2025-11-25 14:44:26');
+(20, 8, 'X-Ray', '', NULL, 'pending', 4, '2025-11-25 14:44:26', '2025-11-25 14:44:26'),
+(21, 8, 'Sputum Test', 'vbbzb', NULL, 'pending', 4, '2025-11-26 22:25:36', '2025-11-26 22:25:36'),
+(22, 2, 'X-Ray', 'xczvz', '', 'completed', 4, '2025-11-26 22:31:40', '2025-11-26 23:29:32'),
+(23, 2, 'Blood Sugar', 'vfb', '', 'completed', 4, '2025-11-26 23:18:19', '2025-11-26 23:29:32');
 
 -- --------------------------------------------------------
 
@@ -142,26 +145,30 @@ CREATE TABLE `patients` (
   `phone` varchar(20) DEFAULT NULL,
   `gender` enum('male','female') DEFAULT NULL,
   `created_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `patient_type` enum('standard','child','senior','emergency','follow_up') DEFAULT 'standard',
+  `consultation_fee` decimal(10,2) DEFAULT 0.00
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `patients`
 --
 
-INSERT INTO `patients` (`id`, `card_no`, `full_name`, `address`, `age`, `weight`, `phone`, `gender`, `created_by`, `created_at`) VALUES
-(21, 'PT2025-00001', 'Asha Mohamed Ali', 'Tombondo', 34, 62.50, '0777123456', 'female', 1, '2025-11-21 16:25:30'),
-(22, 'PT2025-00002', 'Salum Hassan Omar', 'Kijitoupele', 45, 78.00, '0778234567', 'male', 1, '2025-11-21 16:25:30'),
-(23, 'PT2025-00003', 'Mariam Abdalla', 'Fuoni', 22, 55.20, '0773345678', 'female', 1, '2025-11-21 16:25:30'),
-(24, 'PT2025-00004', 'Khamis Ali Said', 'Mchangani', 58, 82.50, '0774456789', 'male', 1, '2025-11-21 16:25:30'),
-(25, 'PT2025-00005', 'Zainab Juma', 'Kisiwandui', 29, 68.00, '0775567890', 'female', 1, '2025-11-21 16:25:30'),
-(26, 'PT2025-00006', 'Omari Rashid', 'Mwera', 37, 75.30, '0776678901', 'male', 1, '2025-11-21 16:25:30'),
-(27, 'PT2025-00007', 'Rehema Yusuf', 'Jumbi', 31, 59.80, '0777789012', 'female', 1, '2025-11-21 16:25:30'),
-(28, 'PT2025-00008', 'Abdalla Khamis', 'Kidimni', 51, 88.90, '0778890123', 'male', 1, '2025-11-21 16:25:30'),
-(29, 'PT2025-00009', 'Halima Said', 'Mchangani', 26, NULL, '0779901234', 'female', 1, '2025-11-21 16:25:30'),
-(30, 'PT2025-00010', 'Juma Ali', 'Tombondo', 40, 79.00, NULL, 'male', 1, '2025-11-21 16:25:30'),
-(31, 'PT2025-00011', 'Mudathir JUma Kassim', 'Ushirika', 21, 18.00, '066554433', 'male', 6, '2025-11-23 09:17:13'),
-(33, 'PT2025-00012', 'HUSSEIN ABDULRAHMAN', 'Ushirika', 23, 77.00, '0658216348', 'male', 6, '2025-11-24 15:44:57');
+INSERT INTO `patients` (`id`, `card_no`, `full_name`, `address`, `age`, `weight`, `phone`, `gender`, `created_by`, `created_at`, `patient_type`, `consultation_fee`) VALUES
+(21, 'PT2025-00001', 'Asha Mohamed Ali', 'Tombondo', 34, 62.50, '0777123456', 'female', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(22, 'PT2025-00002', 'Salum Hassan Omar', 'Kijitoupele', 45, 78.00, '0778234567', 'male', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(23, 'PT2025-00003', 'Mariam Abdalla', 'Fuoni', 22, 55.20, '0773345678', 'female', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(24, 'PT2025-00004', 'Khamis Ali Said', 'Mchangani', 58, 82.50, '0774456789', 'male', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(25, 'PT2025-00005', 'Zainab Juma', 'Kisiwandui', 29, 68.00, '0775567890', 'female', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(26, 'PT2025-00006', 'Omari Rashid', 'Mwera', 37, 75.30, '0776678901', 'male', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(27, 'PT2025-00007', 'Rehema Yusuf', 'Jumbi', 31, 59.80, '0777789012', 'female', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(28, 'PT2025-00008', 'Abdalla Khamis', 'Kidimni', 51, 88.90, '0778890123', 'male', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(29, 'PT2025-00009', 'Halima Said', 'Mchangani', 26, NULL, '0779901234', 'female', 1, '2025-11-21 16:25:30', 'standard', 0.00),
+(30, 'PT2025-00010', 'Juma Ali', 'Tombondo', 40, 79.00, '', 'male', 1, '2025-11-21 16:25:30', 'standard', 10000.00),
+(31, 'PT2025-00011', 'Mudathir JUma Kassim', 'Ushirika', 21, 18.00, '066554433', 'male', 6, '2025-11-23 09:17:13', 'standard', 1000.00),
+(33, 'PT2025-00012', 'HUSSEIN ABDULRAHMAN', 'Ushirika', 23, 77.00, '0658216348', 'male', 6, '2025-11-24 15:44:57', 'standard', 10000.00),
+(34, 'PT2025-00013', 'GHANIA JUMA MOHAMMES', 'Ushirika', 32, 45.00, '0658216348', 'female', 6, '2025-11-26 16:29:31', 'standard', 10000.00),
+(35, 'PT2025-00014', 'HUSNA ALI ABDULRAHMAN', 'Ushirika', 18, 24.00, '0658216348', 'female', NULL, '2025-11-26 21:36:00', 'standard', 10000.00);
 
 -- --------------------------------------------------------
 
@@ -172,38 +179,34 @@ INSERT INTO `patients` (`id`, `card_no`, `full_name`, `address`, `age`, `weight`
 CREATE TABLE `payments` (
   `id` int(11) NOT NULL,
   `patient_id` int(11) NOT NULL,
-  `checking_form_id` int(11) NOT NULL,
+  `checking_form_id` int(11) DEFAULT NULL,
   `prescription_id` int(11) DEFAULT NULL,
   `lab_test_id` int(11) DEFAULT NULL,
   `amount` decimal(10,2) NOT NULL,
   `payment_type` varchar(50) DEFAULT NULL,
   `status` enum('pending','paid') DEFAULT 'pending',
   `processed_by` int(11) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `medicine_amount` decimal(10,2) DEFAULT 0.00,
+  `lab_amount` decimal(10,2) DEFAULT 0.00,
+  `notes` text DEFAULT NULL,
+  `payment_method` varchar(50) DEFAULT NULL,
+  `amount_paid` decimal(10,2) DEFAULT NULL,
+  `transaction_id` varchar(100) DEFAULT NULL,
+  `paid_at` timestamp NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Dumping data for table `payments`
 --
 
-INSERT INTO `payments` (`id`, `patient_id`, `checking_form_id`, `prescription_id`, `lab_test_id`, `amount`, `payment_type`, `status`, `processed_by`, `created_at`) VALUES
-(1, 29, 6, NULL, NULL, 5000.00, 'cash', 'paid', 8, '2025-11-24 10:30:45'),
-(2, 25, 2, NULL, NULL, 10000.00, 'card', 'paid', 8, '2025-11-24 10:31:37'),
-(3, 33, 8, NULL, NULL, 10000.00, 'cash', 'paid', 8, '2025-11-24 16:00:59'),
-(4, 28, 9, NULL, NULL, 20000.00, 'cash', 'pending', 8, '2025-11-24 16:53:05'),
-(5, 31, 4, NULL, NULL, 3000.00, 'cash', 'paid', 8, '2025-11-24 16:53:11'),
-(6, 28, 3, NULL, NULL, 5000.00, 'cash', 'paid', 8, '2025-11-24 16:53:16'),
-(7, 29, 6, NULL, NULL, 1000.00, 'medicine', 'pending', 7, '2025-11-25 12:51:58'),
-(8, 29, 6, NULL, NULL, 1000.00, 'medicine', 'pending', 7, '2025-11-25 12:53:17'),
-(9, 29, 6, NULL, NULL, 1000.00, 'medicine', 'pending', 7, '2025-11-25 13:01:26'),
-(10, 29, 6, NULL, NULL, 1000.00, 'medicine', 'pending', 7, '2025-11-25 13:01:29'),
-(11, 33, 8, NULL, NULL, 2000.00, 'medicine', 'pending', 7, '2025-11-25 13:50:07'),
-(12, 33, 8, NULL, NULL, 500.00, 'medicine', 'pending', 7, '2025-11-25 13:51:44'),
-(13, 30, 5, NULL, NULL, 1000.00, 'medicine', 'pending', 7, '2025-11-25 14:00:20'),
-(14, 30, 5, NULL, NULL, 0.00, 'medicine', 'pending', 7, '2025-11-25 14:00:23'),
-(17, 33, 8, NULL, NULL, 100.00, 'medicine_and_lab', 'pending', 7, '2025-11-25 16:02:55'),
-(18, 30, 5, NULL, NULL, 300.00, 'medicine_and_lab', 'pending', 7, '2025-11-25 16:27:38'),
-(19, 29, 6, NULL, NULL, 100.00, 'medicine_and_lab', 'pending', 7, '2025-11-25 16:35:41');
+INSERT INTO `payments` (`id`, `patient_id`, `checking_form_id`, `prescription_id`, `lab_test_id`, `amount`, `payment_type`, `status`, `processed_by`, `created_at`, `medicine_amount`, `lab_amount`, `notes`, `payment_method`, `amount_paid`, `transaction_id`, `paid_at`) VALUES
+(27, 30, 5, NULL, NULL, 2000.00, 'medicine_and_lab', 'paid', 7, '2025-11-26 14:14:26', 2000.00, 0.00, '', NULL, NULL, NULL, NULL),
+(28, 33, 8, NULL, NULL, 22000.00, 'medicine_and_lab', 'paid', 7, '2025-11-26 15:42:37', 12000.00, 10000.00, '', NULL, NULL, NULL, NULL),
+(29, 29, 6, NULL, NULL, 1000.00, 'medicine_and_lab', 'paid', 8, '2025-11-26 18:48:44', 1000.00, 0.00, ' | PAID: ,n', 'cash', 1000.00, 'TXN001', '2025-11-26 19:57:55'),
+(30, 31, 4, NULL, NULL, 2000.00, 'medicine_and_lab', 'paid', 7, '2025-11-26 20:00:57', 1000.00, 1000.00, 'CLEAR', NULL, NULL, NULL, NULL),
+(34, 33, NULL, NULL, NULL, 10000.00, 'consultation', 'pending', NULL, '2025-11-26 21:34:40', 0.00, 0.00, NULL, NULL, NULL, NULL, NULL),
+(35, 35, NULL, NULL, NULL, 10000.00, 'consultation', 'pending', NULL, '2025-11-26 21:36:00', 0.00, 0.00, NULL, NULL, NULL, NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -229,9 +232,9 @@ CREATE TABLE `prescriptions` (
 
 INSERT INTO `prescriptions` (`id`, `checking_form_id`, `medicine_name`, `dosage`, `frequency`, `duration`, `instructions`, `status`, `created_at`) VALUES
 (1, 3, 'sdgvdfb', 'fbfbf', 'bvfdnb', 'fbvcn ', 'fnb vn ', 'dispensed', '2025-11-23 15:07:35'),
-(2, 4, 'fdbhjnhgm', 'mm,j,', 'k;lk/l', 'lkj;', 'lkj;lkl', 'pending', '2025-11-23 21:07:14'),
-(3, 2, 'fdbhjnhgm', 'fbfbf', 'fhbnm', 'nghmn', 'ngn', 'pending', '2025-11-23 21:11:38'),
-(4, 2, 'nbggn', 'nvc', 'n bcv', 'bvc', 'bzn', 'pending', '2025-11-24 04:51:06'),
+(2, 4, 'fdbhjnhgm', 'mm,j,', 'k;lk/l', 'lkj;', 'lkj;lkl', 'dispensed', '2025-11-23 21:07:14'),
+(3, 2, 'fdbhjnhgm', 'fbfbf', 'fhbnm', 'nghmn', 'ngn', 'dispensed', '2025-11-23 21:11:38'),
+(4, 2, 'nbggn', 'nvc', 'n bcv', 'bvc', 'bzn', 'dispensed', '2025-11-24 04:51:06'),
 (5, 6, 'nbggn', 'mm,j,', 'n bcv', 'fbvcn ', 'bhhi', '', '2025-11-24 05:42:56'),
 (6, 8, 'GGGHFT', 'FDTR', 'RTDTYG', 'FDFTY', 'B BN ', 'dispensed', '2025-11-24 15:52:12'),
 (7, 9, 'PANADOL', '200%', '3/3', '5', 'KIJIKO KIMOJA', 'dispensed', '2025-11-24 16:26:18'),
@@ -251,7 +254,76 @@ INSERT INTO `prescriptions` (`id`, `checking_form_id`, `medicine_name`, `dosage`
 (21, 5, 'mgongo', '500mg', 'bdba', '7 days', '', '', '2025-11-25 13:57:56'),
 (22, 5, 'fgfgfgfgfgfgfgfgfgfgfg', 'gh', 'fhjj', 'jghj', '', 'dispensed', '2025-11-25 13:59:57'),
 (23, 8, 'dawa ', '500mg', 'three per day', '7 days', '', '', '2025-11-25 14:45:12'),
-(24, 8, 'dawa ya mguu', '500mg', 'bdba', '7 days', '', '', '2025-11-25 15:21:24');
+(24, 8, 'dawa ya mguu', '500mg', 'bdba', '7 days', '', '', '2025-11-25 15:21:24'),
+(25, 8, 'PANADOL', '300%', '3/3', '5', 'utaongezana hii', 'dispensed', '2025-11-26 13:32:05');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `receipts`
+--
+
+CREATE TABLE `receipts` (
+  `id` int(11) NOT NULL,
+  `payment_id` int(11) NOT NULL,
+  `receipt_number` varchar(50) NOT NULL,
+  `total_amount` decimal(10,2) NOT NULL,
+  `amount_paid` decimal(10,2) NOT NULL,
+  `change_amount` decimal(10,2) DEFAULT 0.00,
+  `issued_by` int(11) NOT NULL,
+  `issued_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `receipts`
+--
+
+INSERT INTO `receipts` (`id`, `payment_id`, `receipt_number`, `total_amount`, `amount_paid`, `change_amount`, `issued_by`, `issued_at`) VALUES
+(1, 27, 'RCP202511260027', 12000.00, 12000.00, 0.00, 8, '2025-11-26 17:30:22'),
+(2, 28, 'RCP202511260028', 32000.00, 32000.00, 0.00, 8, '2025-11-26 17:31:34'),
+(3, 29, 'RCP202511260029', 1000.00, 1000.00, 0.00, 8, '2025-11-26 19:41:50'),
+(4, 29, 'RCP202511262057550029', 1000.00, 1000.00, 0.00, 8, '2025-11-26 19:57:55'),
+(5, 30, 'RCP202511260030', 1000.00, 1000.00, 0.00, 8, '2025-11-26 20:03:04');
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `refunds`
+--
+
+CREATE TABLE `refunds` (
+  `id` int(11) NOT NULL,
+  `payment_id` int(11) NOT NULL,
+  `refund_amount` decimal(10,2) NOT NULL,
+  `refund_reason` text DEFAULT NULL,
+  `processed_by` int(11) NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `settings`
+--
+
+CREATE TABLE `settings` (
+  `id` int(11) NOT NULL,
+  `setting_key` varchar(100) NOT NULL,
+  `setting_value` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Dumping data for table `settings`
+--
+
+INSERT INTO `settings` (`id`, `setting_key`, `setting_value`, `created_at`, `updated_at`) VALUES
+(1, 'consultation_fee_standard', '10000', '2025-11-26 16:05:01', '2025-11-26 16:05:01'),
+(2, 'consultation_fee_child', '5000', '2025-11-26 16:05:01', '2025-11-26 16:05:01'),
+(3, 'consultation_fee_senior', '7000', '2025-11-26 16:05:01', '2025-11-26 16:05:01'),
+(4, 'consultation_fee_emergency', '15000', '2025-11-26 16:05:01', '2025-11-26 16:05:01'),
+(5, 'consultation_fee_follow_up', '8000', '2025-11-26 16:05:01', '2025-11-26 16:05:01');
 
 -- --------------------------------------------------------
 
@@ -282,7 +354,7 @@ CREATE TABLE `users` (
 INSERT INTO `users` (`id`, `username`, `password`, `email`, `role`, `full_name`, `phone`, `district`, `region`, `created_at`, `status`, `permissions`, `last_login`) VALUES
 (1, 'admin', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin@hospital.com', 'admin', 'System Administrator', '+255 658 216 348', 'Mombasa', 'Zanzibar', '2025-11-17 17:27:41', 'active', '{\"all\":[\"full_access\"]}', NULL),
 (4, 'hussein', '$2y$10$TVl7mqEx/6gPqrJTXQknoOy7Ppi7D51WXD5n4.8eLIXZglZ7c.gaC', 'husseinali2334@gmail.com', 'doctor', 'ABDALLA ABRAHMANI ABDALLA', '+255775892103', 'mjini', 'Zanzibar', '2025-11-17 22:47:33', 'active', '{\"patients\":[\"view\",\"create\",\"edit\",\"delete\"],\"appointments\":[\"view\",\"create\",\"edit\",\"delete\"],\"prescriptions\":[\"view\",\"create\",\"edit\",\"delete\"],\"lab_tests\":[\"view\",\"create\",\"edit\"],\"medical_records\":[\"view\",\"create\",\"edit\"],\"reports\":[\"view\"]}', NULL),
-(5, 'khamis', '$2y$10$gldUu0D/esdCVeks6zZIkugjklDWgAuvpFCTf/5z/MZ0evAbBL6Le', '', 'laboratory', '', '', 'mjini magharibi', 'magharibi B', '2025-11-18 06:49:39', 'active', NULL, NULL),
+(5, 'khamis', '$2y$10$gldUu0D/esdCVeks6zZIkugjklDWgAuvpFCTf/5z/MZ0evAbBL6Le', 'husseinabdulrahman2334@gmail.com', 'laboratory', 'HUSSEIN ABDULRAHMAN', '0658216348', 'mjini magharibi', 'magharibi B', '2025-11-18 06:49:39', 'active', NULL, NULL),
 (6, 'abuu', '$2y$10$kAvjjhBBfy.WLAyrU53x5.lawN1e5rnv2cKZ46ZCSlap2MNcRQS9G', 'abuu@gmail.com', 'receptionist', 'Abubakar DC', '+255777418200', 'mjini magharibi', 'magharibi B', '2025-11-23 08:19:20', 'active', '[]', NULL),
 (7, 'salim', '$2y$10$.GCrijkI0gHnbq5/cWiOYOSsNr0k205Mf4wBGAf0GKSjrbGFVlWnq', 'husseinabdulrahman2334@gmail.com', 'pharmacy', 'HUSSEIN ABDULRAHMAN', '0658216348', 'Tomondo', 'Zanzibar', '2025-11-23 19:53:04', 'active', NULL, NULL),
 (8, 'saleh', '$2y$10$Fl.74IM.XwcALS5GvnyJI.m7YE9q3F4641bOA3OZt85Bq0jSdhRAK', 'husseinabdulrahman2334@gmail.com', 'cashier', 'HUSSEIN ABDULRAHMAN', '0658216348', 'Tomondo', 'Zanzibar', '2025-11-24 09:27:00', 'active', NULL, NULL);
@@ -348,6 +420,30 @@ ALTER TABLE `prescriptions`
   ADD KEY `checking_form_id` (`checking_form_id`);
 
 --
+-- Indexes for table `receipts`
+--
+ALTER TABLE `receipts`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `receipt_number` (`receipt_number`),
+  ADD KEY `payment_id` (`payment_id`),
+  ADD KEY `issued_by` (`issued_by`);
+
+--
+-- Indexes for table `refunds`
+--
+ALTER TABLE `refunds`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `payment_id` (`payment_id`),
+  ADD KEY `processed_by` (`processed_by`);
+
+--
+-- Indexes for table `settings`
+--
+ALTER TABLE `settings`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `setting_key` (`setting_key`);
+
+--
 -- Indexes for table `users`
 --
 ALTER TABLE `users`
@@ -380,25 +476,43 @@ ALTER TABLE `insurance`
 -- AUTO_INCREMENT for table `laboratory_tests`
 --
 ALTER TABLE `laboratory_tests`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=21;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=24;
 
 --
 -- AUTO_INCREMENT for table `patients`
 --
 ALTER TABLE `patients`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=34;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=36;
 
 --
 -- AUTO_INCREMENT for table `payments`
 --
 ALTER TABLE `payments`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=20;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=36;
 
 --
 -- AUTO_INCREMENT for table `prescriptions`
 --
 ALTER TABLE `prescriptions`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=25;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=26;
+
+--
+-- AUTO_INCREMENT for table `receipts`
+--
+ALTER TABLE `receipts`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
+
+--
+-- AUTO_INCREMENT for table `refunds`
+--
+ALTER TABLE `refunds`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
+-- AUTO_INCREMENT for table `settings`
+--
+ALTER TABLE `settings`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT for table `users`
@@ -457,6 +571,20 @@ ALTER TABLE `payments`
 --
 ALTER TABLE `prescriptions`
   ADD CONSTRAINT `prescriptions_ibfk_1` FOREIGN KEY (`checking_form_id`) REFERENCES `checking_forms` (`id`);
+
+--
+-- Constraints for table `receipts`
+--
+ALTER TABLE `receipts`
+  ADD CONSTRAINT `receipts_ibfk_1` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`),
+  ADD CONSTRAINT `receipts_ibfk_2` FOREIGN KEY (`issued_by`) REFERENCES `users` (`id`);
+
+--
+-- Constraints for table `refunds`
+--
+ALTER TABLE `refunds`
+  ADD CONSTRAINT `refunds_ibfk_1` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`),
+  ADD CONSTRAINT `refunds_ibfk_2` FOREIGN KEY (`processed_by`) REFERENCES `users` (`id`);
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

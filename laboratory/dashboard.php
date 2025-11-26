@@ -745,6 +745,171 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             flex-wrap: wrap;
         }
 
+        /* NEW: Dropdown Results Container for Completed Tests */
+        .results-dropdown-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        
+        .dropdown-header {
+            background: #f8fafc;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e2e8f0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+        
+        .dropdown-header:hover {
+            background: #f1f5f9;
+        }
+        
+        .dropdown-header.active {
+            background: #8b5cf6;
+            color: white;
+        }
+        
+        .dropdown-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+        
+        .dropdown-icon {
+            transition: transform 0.3s ease;
+        }
+        
+        .dropdown-header.active .dropdown-icon {
+            transform: rotate(180deg);
+        }
+        
+        .dropdown-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease;
+        }
+        
+        .dropdown-content.active {
+            max-height: 1000px;
+        }
+        
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .result-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            border-left: 4px solid #10b981;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .result-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #10b981, #8b5cf6);
+        }
+        
+        .result-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+        }
+        
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        
+        .result-type {
+            font-weight: bold;
+            color: #1e293b;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .result-type i {
+            color: #8b5cf6;
+        }
+        
+        .result-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .result-info {
+            margin-bottom: 15px;
+        }
+        
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+        
+        .info-label {
+            color: #64748b;
+            font-weight: 500;
+        }
+        
+        .info-value {
+            color: #1e293b;
+            font-weight: 600;
+        }
+        
+        .result-description {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+            color: #475569;
+            border-left: 3px solid #e2e8f0;
+        }
+        
+        .result-findings {
+            background: #ecfdf5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #10b981;
+        }
+        
+        .findings-label {
+            font-weight: bold;
+            color: #065f46;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
         /* Tables */
         .table-card {
             background: white;
@@ -969,6 +1134,10 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             }
             
             .patient-cards-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .results-grid {
                 grid-template-columns: 1fr;
             }
             
@@ -1227,7 +1396,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 <?php endif; ?>
             </div>
 
-            <!-- Completed Tests Tab -->
+            <!-- Completed Tests Tab - WITH DROPDOWN MENU -->
             <div id="completed-tab" class="tab-content">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
                     <i class="fas fa-check-circle"></i> All Completed Laboratory Tests
@@ -1240,7 +1409,95 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                         <p>No laboratory tests have been completed yet.</p>
                     </div>
                 <?php else: ?>
-                    <div class="table-card">
+                    <!-- NEW: Dropdown Results Container -->
+                    <div class="results-dropdown-container">
+                        <div class="dropdown-header active" onclick="toggleResultsDropdown()">
+                            <div class="dropdown-title">
+                                <i class="fas fa-file-medical-alt"></i>
+                                Completed Laboratory Tests (<?php echo count($all_completed_tests); ?>)
+                            </div>
+                            <div class="dropdown-icon">
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                        </div>
+                        <div class="dropdown-content active">
+                            <div class="results-grid">
+                                <?php foreach ($all_completed_tests as $test): ?>
+                                <div class="result-card">
+                                    <div class="result-header">
+                                        <div class="result-type">
+                                            <i class="fas fa-microscope"></i>
+                                            <?php echo htmlspecialchars($test['test_type']); ?>
+                                        </div>
+                                        <div class="result-status">Completed</div>
+                                    </div>
+                                    
+                                    <div class="result-info">
+                                        <div class="info-row">
+                                            <span class="info-label">Patient:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($test['patient_name']); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Card No:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($test['card_no']); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Doctor:</span>
+                                            <span class="info-value">Dr. <?php echo htmlspecialchars($test['doctor_name']); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Lab Technician:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($test['lab_technician'] ?? 'Not specified'); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Completed Date:</span>
+                                            <span class="info-value"><?php echo date('M j, Y H:i', strtotime($test['updated_at'])); ?></span>
+                                        </div>
+                                    </div>
+                                    
+                                    <?php if (!empty($test['test_description'])): ?>
+                                    <div class="result-description">
+                                        <strong>Test Description:</strong><br>
+                                        <?php echo htmlspecialchars($test['test_description']); ?>
+                                    </div>
+                                    <?php endif; ?>
+                                    
+                                    <?php if (!empty($test['results'])): ?>
+                                    <div class="result-findings">
+                                        <div class="findings-label">
+                                            <i class="fas fa-microscope"></i>
+                                            Laboratory Findings:
+                                        </div>
+                                        <div style="color: #065f46; font-size: 0.9rem; line-height: 1.5;">
+                                            <?php 
+                                            $results = htmlspecialchars($test['results']);
+                                            if (strlen($results) > 150) {
+                                                echo substr($results, 0, 150) . '...';
+                                            } else {
+                                                echo $results;
+                                            }
+                                            ?>
+                                        </div>
+                                    </div>
+                                    <?php endif; ?>
+                                    
+                                    <div class="action-buttons">
+                                        <button class="btn btn-info btn-sm" onclick="editTest(<?php echo $test['id']; ?>, '<?php echo htmlspecialchars(addslashes($test['results'])); ?>')">
+                                            <i class="fas fa-edit"></i> Edit
+                                        </button>
+                                        <button class="btn btn-danger btn-sm" onclick="deleteTest(<?php echo $test['id']; ?>)">
+                                            <i class="fas fa-trash"></i> Delete
+                                        </button>
+                                    </div>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- DataTable View (Alternative) -->
+                    <div class="table-card" style="margin-top: 30px;">
+                        <h3><i class="fas fa-table"></i> Table View</h3>
                         <div class="table-responsive">
                             <table class="table table-striped table-hover" id="completedTestsTable" style="width:100%">
                                 <thead>
@@ -1444,6 +1701,16 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 }
             });
         });
+
+        // NEW: Function to toggle results dropdown
+        function toggleResultsDropdown() {
+            const header = document.querySelector('.dropdown-header');
+            const content = document.querySelector('.dropdown-content');
+            const icon = document.querySelector('.dropdown-icon');
+            
+            header.classList.toggle('active');
+            content.classList.toggle('active');
+        }
 
         // Function to show tabs
         function showTab(tabName) {

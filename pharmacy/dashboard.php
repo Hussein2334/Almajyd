@@ -97,7 +97,8 @@ if (isset($_POST['dispense_all_prescriptions'])) {
     $patient_id = $_POST['patient_id'];
     $prescriptions_data = $_POST['prescriptions'] ?? [];
     $lab_tests_data = $_POST['lab_tests'] ?? [];
-    $total_amount = 0;
+    $total_medicine_amount = 0;
+    $total_lab_amount = 0;
     
     try {
         $pdo->beginTransaction();
@@ -120,8 +121,8 @@ if (isset($_POST['dispense_all_prescriptions'])) {
                     $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'dispensed' WHERE id = ?");
                     $stmt->execute([$prescription_id]);
                     
-                    // Add to total amount
-                    $total_amount += $price;
+                    // Add to total medicine amount
+                    $total_medicine_amount += $price;
                 } else {
                     // Mark as not available
                     $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'not_available' WHERE id = ?");
@@ -134,41 +135,66 @@ if (isset($_POST['dispense_all_prescriptions'])) {
                 $lab_test_price = floatval($data['price'] ?? 0);
                 
                 if ($lab_test_price > 0) {
-                    // Add lab test price to total amount
-                    $total_amount += $lab_test_price;
+                    // Add lab test price to total lab amount
+                    $total_lab_amount += $lab_test_price;
                 }
             }
             
-            // Create or update payment record with total medicine AND lab tests price
+            // Calculate total amount
+            $total_amount = $total_medicine_amount + $total_lab_amount;
+            
+            // Create or update payment record with separate medicine and lab amounts
             if ($total_amount > 0) {
-                $payment_stmt = $pdo->prepare("
-                    INSERT INTO payments (patient_id, checking_form_id, amount, payment_type, status, processed_by) 
-                    VALUES (?, ?, ?, 'medicine_and_lab', 'pending', ?)
-                    ON DUPLICATE KEY UPDATE amount = amount + ?, processed_by = ?
+                // Check if payment record already exists
+                $check_payment_stmt = $pdo->prepare("
+                    SELECT id FROM payments 
+                    WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'
                 ");
-                $payment_stmt->execute([
-                    $patient_id, 
-                    $checking_form_id, 
-                    $total_amount, 
-                    $_SESSION['user_id'],
-                    $total_amount,
-                    $_SESSION['user_id']
-                ]);
+                $check_payment_stmt->execute([$patient_id, $checking_form_id]);
+                $existing_payment = $check_payment_stmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($existing_payment) {
+                    // Update existing payment
+                    $payment_stmt = $pdo->prepare("
+                        UPDATE payments 
+                        SET amount = ?, medicine_amount = ?, lab_amount = ?, processed_by = ?, created_at = NOW()
+                        WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'
+                    ");
+                    $payment_stmt->execute([
+                        $total_amount, 
+                        $total_medicine_amount, 
+                        $total_lab_amount,
+                        $_SESSION['user_id'],
+                        $patient_id, 
+                        $checking_form_id
+                    ]);
+                } else {
+                    // Create new payment record
+                    $payment_stmt = $pdo->prepare("
+                        INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, payment_type, status, processed_by) 
+                        VALUES (?, ?, ?, ?, ?, 'medicine_and_lab', 'pending', ?)
+                    ");
+                    $payment_stmt->execute([
+                        $patient_id, 
+                        $checking_form_id, 
+                        $total_amount, 
+                        $total_medicine_amount, 
+                        $total_lab_amount,
+                        $_SESSION['user_id']
+                    ]);
+                }
             }
             
-            $success_message = "Prescriptions and lab tests processed successfully! Total amount: TSh " . number_format($total_amount, 2);
+            $success_message = "Prescriptions and lab tests processed successfully!<br>";
+            $success_message .= "Medicine Amount: TSh " . number_format($total_medicine_amount, 2) . "<br>";
+            $success_message .= "Lab Amount: TSh " . number_format($total_lab_amount, 2) . "<br>";
+            $success_message .= "Total Amount: TSh " . number_format($total_amount, 2);
+            
         } else {
             $error_message = "No checking form found for this patient!";
         }
         
         $pdo->commit();
-        
-        // Refresh page to update status but maintain scroll position
-        echo "<script>
-            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
-            window.location.href = window.location.href.split('?')[0];
-        </script>";
-        exit;
         
     } catch (PDOException $e) {
         $pdo->rollBack();
@@ -179,7 +205,8 @@ if (isset($_POST['dispense_all_prescriptions'])) {
 // Handle Edit Total Price (for completed prescriptions and lab tests)
 if (isset($_POST['edit_total_price'])) {
     $patient_id = $_POST['patient_id'];
-    $new_price = $_POST['new_price'];
+    $new_medicine_amount = $_POST['new_medicine_amount'];
+    $new_lab_amount = $_POST['new_lab_amount'];
     $reason = $_POST['reason'] ?? '';
     
     try {
@@ -193,6 +220,9 @@ if (isset($_POST['edit_total_price'])) {
         if ($checking_form) {
             $checking_form_id = $checking_form['id'];
             
+            // Calculate new total amount
+            $new_total_amount = $new_medicine_amount + $new_lab_amount;
+            
             // Check if payment record exists
             $check_payment_stmt = $pdo->prepare("
                 SELECT id FROM payments 
@@ -205,35 +235,42 @@ if (isset($_POST['edit_total_price'])) {
                 // Update existing payment amount
                 $payment_stmt = $pdo->prepare("
                     UPDATE payments 
-                    SET amount = ?
+                    SET amount = ?, medicine_amount = ?, lab_amount = ?, notes = ?, processed_by = ?
                     WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'
                 ");
-                $payment_stmt->execute([$new_price, $patient_id, $checking_form_id]);
+                $payment_stmt->execute([
+                    $new_total_amount, 
+                    $new_medicine_amount, 
+                    $new_lab_amount,
+                    $reason,
+                    $_SESSION['user_id'],
+                    $patient_id, 
+                    $checking_form_id
+                ]);
             } else {
                 // Create new payment record
                 $payment_stmt = $pdo->prepare("
-                    INSERT INTO payments (patient_id, checking_form_id, amount, payment_type, status, processed_by) 
-                    VALUES (?, ?, ?, 'medicine_and_lab', 'pending', ?)
+                    INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, payment_type, status, processed_by, notes) 
+                    VALUES (?, ?, ?, ?, ?, 'medicine_and_lab', 'pending', ?, ?)
                 ");
                 $payment_stmt->execute([
                     $patient_id, 
                     $checking_form_id, 
-                    $new_price, 
-                    $_SESSION['user_id']
+                    $new_total_amount, 
+                    $new_medicine_amount, 
+                    $new_lab_amount,
+                    $_SESSION['user_id'],
+                    $reason
                 ]);
             }
             
-            $success_message = "Total price updated successfully to TSh " . number_format($new_price, 2);
+            $success_message = "Price updated successfully!<br>";
+            $success_message .= "Medicine Amount: TSh " . number_format($new_medicine_amount, 2) . "<br>";
+            $success_message .= "Lab Amount: TSh " . number_format($new_lab_amount, 2) . "<br>";
+            $success_message .= "Total Amount: TSh " . number_format($new_total_amount, 2);
         }
         
         $pdo->commit();
-        
-        // Refresh page but maintain position
-        echo "<script>
-            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
-            window.location.href = window.location.href.split('?')[0];
-        </script>";
-        exit;
         
     } catch (PDOException $e) {
         $pdo->rollBack();
@@ -271,17 +308,112 @@ if (isset($_POST['delete_dispensed_card'])) {
         
         $pdo->commit();
         
-        // Refresh page but maintain position
-        echo "<script>
-            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
-            window.location.href = window.location.href.split('?')[0];
-        </script>";
-        exit;
-        
     } catch (PDOException $e) {
         $pdo->rollBack();
         $error_message = "Error deleting patient card: " . $e->getMessage();
     }
+}
+
+// Handle CRUD Operations for Payments
+if (isset($_POST['add_payment'])) {
+    $patient_id = $_POST['patient_id'];
+    $medicine_amount = $_POST['medicine_amount'];
+    $lab_amount = $_POST['lab_amount'];
+    $payment_type = $_POST['payment_type'];
+    $status = $_POST['status'];
+    $notes = $_POST['notes'] ?? '';
+    
+    try {
+        // Get checking_form_id for the patient
+        $checking_stmt = $pdo->prepare("SELECT id FROM checking_forms WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1");
+        $checking_stmt->execute([$patient_id]);
+        $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($checking_form) {
+            $checking_form_id = $checking_form['id'];
+            $total_amount = $medicine_amount + $lab_amount;
+            
+            // Insert new payment
+            $stmt = $pdo->prepare("
+                INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, payment_type, status, processed_by, notes) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                $patient_id, 
+                $checking_form_id, 
+                $total_amount, 
+                $medicine_amount, 
+                $lab_amount,
+                $payment_type,
+                $status,
+                $_SESSION['user_id'],
+                $notes
+            ]);
+            
+            $success_message = "Payment record added successfully!";
+        } else {
+            $error_message = "No checking form found for this patient!";
+        }
+    } catch (PDOException $e) {
+        $error_message = "Error adding payment: " . $e->getMessage();
+    }
+}
+
+// Handle Update Payment
+if (isset($_POST['update_payment'])) {
+    $payment_id = $_POST['payment_id'];
+    $medicine_amount = $_POST['medicine_amount'];
+    $lab_amount = $_POST['lab_amount'];
+    $payment_type = $_POST['payment_type'];
+    $status = $_POST['status'];
+    $notes = $_POST['notes'] ?? '';
+    
+    try {
+        $total_amount = $medicine_amount + $lab_amount;
+        
+        $stmt = $pdo->prepare("
+            UPDATE payments 
+            SET amount = ?, medicine_amount = ?, lab_amount = ?, payment_type = ?, status = ?, notes = ?, processed_by = ?
+            WHERE id = ?
+        ");
+        $stmt->execute([
+            $total_amount, 
+            $medicine_amount, 
+            $lab_amount,
+            $payment_type,
+            $status,
+            $notes,
+            $_SESSION['user_id'],
+            $payment_id
+        ]);
+        
+        $success_message = "Payment record updated successfully!";
+    } catch (PDOException $e) {
+        $error_message = "Error updating payment: " . $e->getMessage();
+    }
+}
+
+// Handle Delete Payment
+if (isset($_POST['delete_payment'])) {
+    $payment_id = $_POST['payment_id'];
+    
+    try {
+        $stmt = $pdo->prepare("DELETE FROM payments WHERE id = ?");
+        $stmt->execute([$payment_id]);
+        
+        $success_message = "Payment record deleted successfully!";
+    } catch (PDOException $e) {
+        $error_message = "Error deleting payment: " . $e->getMessage();
+    }
+}
+
+// Handle Edit Payment (Load data for editing)
+$editing_payment = null;
+if (isset($_GET['edit_payment'])) {
+    $payment_id = $_GET['edit_payment'];
+    $stmt = $pdo->prepare("SELECT * FROM payments WHERE id = ?");
+    $stmt->execute([$payment_id]);
+    $editing_payment = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
 // Get statistics for dashboard
@@ -290,6 +422,11 @@ $today_patients = $pdo->query("SELECT COUNT(*) as total FROM patients WHERE DATE
 $total_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions")->fetch(PDO::FETCH_ASSOC)['total'];
 $pending_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE status = 'pending'")->fetch(PDO::FETCH_ASSOC)['total'];
 $completed_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE status = 'dispensed'")->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Get total revenue statistics
+$total_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'paid'")->fetch(PDO::FETCH_ASSOC)['total'];
+$pending_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'pending'")->fetch(PDO::FETCH_ASSOC)['total'];
+$today_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(created_at) = CURDATE() AND status = 'paid'")->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Get pending prescriptions grouped by patient WITH LAB RESULTS AND PRICES
 $pending_patients = $pdo->query("SELECT 
@@ -338,17 +475,18 @@ GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender, u.full_name, cf.diagnosi
 ORDER BY MAX(pr.created_at) DESC 
 LIMIT 20")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get total amounts from payments for dispensed prescriptions AND lab tests
-$payment_amounts = [];
+// Get payment details with separate medicine and lab amounts
 $payment_details = [];
 $payment_stmt = $pdo->query("
-    SELECT patient_id, checking_form_id, SUM(amount) as total_amount, id as payment_id
-    FROM payments 
-    WHERE payment_type = 'medicine_and_lab' AND status = 'pending'
-    GROUP BY patient_id, checking_form_id, id
+    SELECT p.*, pt.full_name as patient_name, pt.card_no, cf.id as checking_form_id
+    FROM payments p 
+    JOIN patients pt ON p.patient_id = pt.id
+    LEFT JOIN checking_forms cf ON p.checking_form_id = cf.id
+    ORDER BY p.created_at DESC
 ");
-foreach ($payment_stmt->fetchAll(PDO::FETCH_ASSOC) as $payment) {
-    $payment_amounts[$payment['patient_id']] = $payment['total_amount'];
+$all_payments = $payment_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+foreach ($all_payments as $payment) {
     $payment_details[$payment['patient_id']] = $payment;
 }
 
@@ -616,6 +754,9 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         .stat-card.total-rx { border-left-color: #8b5cf6; }
         .stat-card.pending-rx { border-left-color: #f59e0b; }
         .stat-card.completed-rx { border-left-color: #10b981; }
+        .stat-card.revenue { border-left-color: #10b981; }
+        .stat-card.pending-revenue { border-left-color: #f59e0b; }
+        .stat-card.today-revenue { border-left-color: #3b82f6; }
         
         .stat-icon {
             font-size: 2.2em;
@@ -627,6 +768,9 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         .stat-card.total-rx .stat-icon { color: #8b5cf6; }
         .stat-card.pending-rx .stat-icon { color: #f59e0b; }
         .stat-card.completed-rx .stat-icon { color: #10b981; }
+        .stat-card.revenue .stat-icon { color: #10b981; }
+        .stat-card.pending-revenue .stat-icon { color: #f59e0b; }
+        .stat-card.today-revenue .stat-icon { color: #3b82f6; }
         
         .stat-number {
             font-size: 2.2em;
@@ -814,6 +958,16 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         
         .btn-danger:hover {
             background: #dc2626;
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: #6b7280;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
             transform: translateY(-2px);
         }
 
@@ -1236,6 +1390,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         .badge-warning { background: #fef3c7; color: #92400e; }
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-primary { background: #d1fae5; color: #065f46; }
+        .badge-danger { background: #fee2e2; color: #991b1b; }
 
         /* Table responsive container */
         .table-responsive {
@@ -1325,6 +1480,54 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         
         .test-item:last-child {
             border-bottom: none;
+        }
+
+        /* Payments Management */
+        .payments-management {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            margin-bottom: 25px;
+        }
+        
+        .payment-form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .payment-amounts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .amount-display {
+            background: #f8fafc;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border-left: 3px solid #10b981;
+        }
+        
+        .amount-label {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-bottom: 5px;
+        }
+        
+        .amount-value {
+            font-weight: bold;
+            color: #059669;
+            font-size: 1.1rem;
+        }
+        
+        .payment-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
         }
 
         /* MOBILE RESPONSIVE DESIGN */
@@ -1427,6 +1630,14 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 top: auto;
                 right: auto;
                 margin-bottom: 15px;
+            }
+            
+            .payment-form-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .payment-amounts {
+                grid-template-columns: 1fr;
             }
         }
         
@@ -1541,6 +1752,27 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 <div class="stat-number"><?php echo $completed_prescriptions; ?></div>
                 <div class="stat-label">Dispensed Prescriptions</div>
             </div>
+            <div class="stat-card revenue">
+                <div class="stat-icon">
+                    <i class="fas fa-money-bill-wave"></i>
+                </div>
+                <div class="stat-number">TSh <?php echo number_format($total_revenue, 0); ?></div>
+                <div class="stat-label">Total Revenue</div>
+            </div>
+            <div class="stat-card pending-revenue">
+                <div class="stat-icon">
+                    <i class="fas fa-clock"></i>
+                </div>
+                <div class="stat-number">TSh <?php echo number_format($pending_revenue, 0); ?></div>
+                <div class="stat-label">Pending Revenue</div>
+            </div>
+            <div class="stat-card today-revenue">
+                <div class="stat-icon">
+                    <i class="fas fa-calendar-day"></i>
+                </div>
+                <div class="stat-number">TSh <?php echo number_format($today_revenue, 0); ?></div>
+                <div class="stat-label">Today's Revenue</div>
+            </div>
         </div>
 
         <!-- Tabs Navigation -->
@@ -1553,6 +1785,10 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 <button class="tab" onclick="showTab('dispensed')">
                     <i class="fas fa-check-circle"></i>
                     Dispensed Prescriptions (<?php echo count($completed_patients); ?>)
+                </button>
+                <button class="tab" onclick="showTab('payments')">
+                    <i class="fas fa-money-bill-wave"></i>
+                    Payments Management (<?php echo count($all_payments); ?>)
                 </button>
                 <button class="tab" onclick="showTab('lab-results')">
                     <i class="fas fa-file-medical-alt"></i>
@@ -1579,7 +1815,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                     <h4 style="margin-bottom: 15px; color: #1e293b;">
                         <i class="fas fa-plus-circle"></i> Add New Prescription
                     </h4>
-                    <form method="POST" action="">
+                    <form method="POST" action="" id="addPrescriptionForm">
                         <div class="prescription-form-row">
                             <div class="form-group">
                                 <label class="form-label">Patient *</label>
@@ -1677,6 +1913,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                 <h5><i class="fas fa-vial"></i> Laboratory Test Results - Set Prices</h5>
                                 <?php 
                                 $lab_tests = explode(';;', $patient['lab_results']);
+                                $lab_total_price = 0;
                                 foreach ($lab_tests as $test):
                                     $test_data = explode('|', $test);
                                     if (count($test_data) >= 3):
@@ -1797,7 +2034,10 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 <?php else: ?>
                     <div class="cards-grid">
                         <?php foreach ($completed_patients as $patient): 
-                            $total_amount = $payment_amounts[$patient['patient_id']] ?? 0;
+                            $payment = $payment_details[$patient['patient_id']] ?? null;
+                            $total_amount = $payment['amount'] ?? 0;
+                            $medicine_amount = $payment['medicine_amount'] ?? 0;
+                            $lab_amount = $payment['lab_amount'] ?? 0;
                         ?>
                         <div class="card dispensed">
                             <!-- Delete Button -->
@@ -1829,6 +2069,14 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                     <span class="info-value">Dr. <?php echo htmlspecialchars($patient['doctor_name']); ?></span>
                                 </div>
                                 <?php if ($total_amount > 0): ?>
+                                <div class="info-row">
+                                    <span class="info-label">Medicine Amount:</span>
+                                    <span class="info-value price-display">TSh <?php echo number_format($medicine_amount, 2); ?></span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">Lab Amount:</span>
+                                    <span class="info-value price-display">TSh <?php echo number_format($lab_amount, 2); ?></span>
+                                </div>
                                 <div class="info-row">
                                     <span class="info-label">Total Amount:</span>
                                     <span class="info-value price-display">
@@ -1923,14 +2171,19 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                         
                                         <div class="form-row">
                                             <div class="form-group">
-                                                <label class="form-label">New Total Price (TSh)</label>
-                                                <input type="number" name="new_price" class="form-input" min="0" step="0.01" value="<?php echo $total_amount; ?>" required>
+                                                <label class="form-label">Medicine Amount (TSh)</label>
+                                                <input type="number" name="new_medicine_amount" class="form-input" min="0" step="0.01" value="<?php echo $medicine_amount; ?>" required>
                                             </div>
                                             
                                             <div class="form-group">
-                                                <label class="form-label">Reason for Edit</label>
-                                                <input type="text" name="reason" class="form-input" placeholder="Reason for price change">
+                                                <label class="form-label">Lab Amount (TSh)</label>
+                                                <input type="number" name="new_lab_amount" class="form-input" min="0" step="0.01" value="<?php echo $lab_amount; ?>" required>
                                             </div>
+                                        </div>
+                                        
+                                        <div class="form-group">
+                                            <label class="form-label">Reason for Edit</label>
+                                            <input type="text" name="reason" class="form-input" placeholder="Reason for price change">
                                         </div>
                                         
                                         <div class="action-buttons">
@@ -1954,6 +2207,182 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                         <?php endforeach; ?>
                     </div>
                 <?php endif; ?>
+            </div>
+
+            <!-- Payments Management Tab -->
+            <div id="payments-tab" class="tab-content">
+                <h3 style="color: #1e293b; margin-bottom: 20px;">
+                    <i class="fas fa-money-bill-wave"></i> Payments Management - Complete CRUD Operations
+                </h3>
+                
+                <!-- Add New Payment Form -->
+                <div class="payments-management">
+                    <h4 style="margin-bottom: 15px; color: #1e293b;">
+                        <i class="fas fa-plus-circle"></i> 
+                        <?php echo $editing_payment ? 'Edit Payment Record' : 'Add New Payment Record'; ?>
+                    </h4>
+                    <form method="POST" action="">
+                        <?php if ($editing_payment): ?>
+                            <input type="hidden" name="payment_id" value="<?php echo $editing_payment['id']; ?>">
+                        <?php endif; ?>
+                        
+                        <div class="payment-form-grid">
+                            <div class="form-group">
+                                <label class="form-label">Patient *</label>
+                                <select name="patient_id" class="form-select" required <?php echo $editing_payment ? 'disabled' : ''; ?>>
+                                    <option value="">Select Patient</option>
+                                    <?php foreach ($patients as $patient): ?>
+                                    <option value="<?php echo $patient['id']; ?>" 
+                                        <?php echo ($editing_payment && $editing_payment['patient_id'] == $patient['id']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($patient['full_name']) . ' (' . htmlspecialchars($patient['card_no']) . ')'; ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <?php if ($editing_payment): ?>
+                                    <input type="hidden" name="patient_id" value="<?php echo $editing_payment['patient_id']; ?>">
+                                <?php endif; ?>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Payment Type *</label>
+                                <select name="payment_type" class="form-select" required>
+                                    <option value="medicine_and_lab" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'medicine_and_lab') ? 'selected' : ''; ?>>Medicine & Laboratory</option>
+                                    <option value="medicine" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'medicine') ? 'selected' : ''; ?>>Medicine Only</option>
+                                    <option value="lab" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'lab') ? 'selected' : ''; ?>>Laboratory Only</option>
+                                    <option value="cash" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'cash') ? 'selected' : ''; ?>>Cash Payment</option>
+                                    <option value="card" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'card') ? 'selected' : ''; ?>>Card Payment</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Medicine Amount (TSh)</label>
+                                <input type="number" name="medicine_amount" class="form-input" min="0" step="0.01" 
+                                    value="<?php echo $editing_payment ? $editing_payment['medicine_amount'] : '0'; ?>" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Laboratory Amount (TSh)</label>
+                                <input type="number" name="lab_amount" class="form-input" min="0" step="0.01" 
+                                    value="<?php echo $editing_payment ? $editing_payment['lab_amount'] : '0'; ?>" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Status *</label>
+                                <select name="status" class="form-select" required>
+                                    <option value="pending" <?php echo ($editing_payment && $editing_payment['status'] == 'pending') ? 'selected' : ''; ?>>Pending</option>
+                                    <option value="paid" <?php echo ($editing_payment && $editing_payment['status'] == 'paid') ? 'selected' : ''; ?>>Paid</option>
+                                    <option value="cancelled" <?php echo ($editing_payment && $editing_payment['status'] == 'cancelled') ? 'selected' : ''; ?>>Cancelled</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Notes</label>
+                                <textarea name="notes" class="form-textarea" placeholder="Additional notes..."><?php echo $editing_payment ? htmlspecialchars($editing_payment['notes']) : ''; ?></textarea>
+                            </div>
+                        </div>
+                        
+                        <!-- Amount Summary -->
+                        <div class="payment-amounts">
+                            <div class="amount-display">
+                                <div class="amount-label">Medicine Total</div>
+                                <div class="amount-value" id="medicineTotalDisplay">
+                                    TSh <?php echo $editing_payment ? number_format($editing_payment['medicine_amount'], 2) : '0.00'; ?>
+                                </div>
+                            </div>
+                            <div class="amount-display">
+                                <div class="amount-label">Lab Total</div>
+                                <div class="amount-value" id="labTotalDisplay">
+                                    TSh <?php echo $editing_payment ? number_format($editing_payment['lab_amount'], 2) : '0.00'; ?>
+                                </div>
+                            </div>
+                            <div class="amount-display" style="grid-column: span 2; background: #d1fae5;">
+                                <div class="amount-label">Grand Total</div>
+                                <div class="amount-value" id="grandTotalDisplay" style="color: #065f46; font-size: 1.3rem;">
+                                    TSh <?php echo $editing_payment ? number_format($editing_payment['amount'], 2) : '0.00'; ?>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="payment-actions">
+                            <?php if ($editing_payment): ?>
+                                <button type="submit" name="update_payment" class="btn btn-warning">
+                                    <i class="fas fa-save"></i> Update Payment Record
+                                </button>
+                                <a href="?" class="btn btn-secondary">
+                                    <i class="fas fa-times"></i> Cancel Edit
+                                </a>
+                            <?php else: ?>
+                                <button type="submit" name="add_payment" class="btn btn-success">
+                                    <i class="fas fa-save"></i> Add Payment Record
+                                </button>
+                            <?php endif; ?>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Payments List -->
+                <div class="table-card">
+                    <h3><i class="fas fa-list"></i> All Payments Records</h3>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover" id="paymentsTable" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Patient</th>
+                                    <th>Medicine Amount</th>
+                                    <th>Lab Amount</th>
+                                    <th>Total Amount</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                    <th>Processed By</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($all_payments as $payment): ?>
+                                <tr>
+                                    <td><strong>#<?php echo $payment['id']; ?></strong></td>
+                                    <td>
+                                        <strong><?php echo htmlspecialchars($payment['patient_name']); ?></strong><br>
+                                        <small><?php echo htmlspecialchars($payment['card_no']); ?></small>
+                                    </td>
+                                    <td>TSh <?php echo number_format($payment['medicine_amount'], 2); ?></td>
+                                    <td>TSh <?php echo number_format($payment['lab_amount'], 2); ?></td>
+                                    <td><strong>TSh <?php echo number_format($payment['amount'], 2); ?></strong></td>
+                                    <td>
+                                        <span class="badge badge-info">
+                                            <?php echo ucfirst(str_replace('_', ' ', $payment['payment_type'])); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge <?php echo $payment['status'] == 'paid' ? 'badge-success' : ($payment['status'] == 'pending' ? 'badge-warning' : 'badge-danger'); ?>">
+                                            <?php echo ucfirst($payment['status']); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo date('M j, Y H:i', strtotime($payment['created_at'])); ?></td>
+                                    <td>
+                                        <small>User #<?php echo $payment['processed_by']; ?></small>
+                                    </td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <a href="?edit_payment=<?php echo $payment['id']; ?>" class="btn btn-info btn-sm">
+                                                <i class="fas fa-edit"></i> Edit
+                                            </a>
+                                            <form method="POST" action="" style="display: inline;">
+                                                <input type="hidden" name="payment_id" value="<?php echo $payment['id']; ?>">
+                                                <button type="submit" name="delete_payment" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this payment record?')">
+                                                    <i class="fas fa-trash"></i> Delete
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <!-- Laboratory Results Tab -->
@@ -2149,12 +2578,42 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 }
             });
 
-            // Restore scroll position after form submission
-            const scrollPosition = sessionStorage.getItem('scrollPosition');
-            if (scrollPosition) {
-                window.scrollTo(0, parseInt(scrollPosition));
-                sessionStorage.removeItem('scrollPosition');
-            }
+            $('#paymentsTable').DataTable({
+                responsive: true,
+                paging: true,
+                searching: true,
+                info: true,
+                ordering: true,
+                pageLength: 10,
+                language: {
+                    search: "Search payments:",
+                    lengthMenu: "Show _MENU_ entries",
+                    info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                    infoEmpty: "Showing 0 to 0 of 0 entries",
+                    infoFiltered: "(filtered from _MAX_ total entries)"
+                },
+                order: [[0, 'desc']] // Sort by ID descending
+            });
+
+            // Auto-update payment amounts when inputs change
+            $('input[name="medicine_amount"], input[name="lab_amount"]').on('input', function() {
+                updatePaymentTotals();
+            });
+
+            // Initialize payment totals
+            updatePaymentTotals();
+
+            // Handle form submissions to prevent page reload
+            $('form').on('submit', function(e) {
+                // Store current scroll position
+                sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
+                
+                // Store current active tab
+                const activeTab = document.querySelector('.tab.active');
+                if (activeTab) {
+                    sessionStorage.setItem('activeTab', activeTab.textContent.trim());
+                }
+            });
         });
 
         // Function to show tabs
@@ -2174,12 +2633,16 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             
             // Add active class to clicked tab
             event.target.classList.add('active');
+            
+            // Store active tab
+            sessionStorage.setItem('activeTab', event.target.textContent.trim());
         }
 
         // Function to update total amount for a patient (INCLUDING LAB TESTS)
         function updateTotalAmount(patientId) {
             const form = document.getElementById('dispenseForm_' + patientId);
-            let total = 0;
+            let medicineTotal = 0;
+            let labTotal = 0;
             
             // Add medicine prices
             const priceInputs = form.querySelectorAll('.price-input-field');
@@ -2188,21 +2651,55 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 const availableRadio = form.querySelector('input[name="prescriptions[' + prescriptionId + '][available]"][value="yes"]');
                 
                 if (availableRadio.checked) {
-                    total += parseFloat(input.value) || 0;
+                    medicineTotal += parseFloat(input.value) || 0;
                 }
             });
             
             // Add lab test prices
             const labPriceInputs = form.querySelectorAll('.lab-price-input-field');
             labPriceInputs.forEach(input => {
-                total += parseFloat(input.value) || 0;
+                labTotal += parseFloat(input.value) || 0;
             });
             
+            const totalAmount = medicineTotal + labTotal;
             const totalAmountElement = document.getElementById('totalAmount_' + patientId);
-            totalAmountElement.textContent = 'Total Amount: TSh ' + total.toLocaleString('en-US', {
+            totalAmountElement.innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: center;">
+                    <div>
+                        <small>Medicine Total</small><br>
+                        <strong>TSh ${medicineTotal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>
+                    </div>
+                    <div>
+                        <small>Lab Total</small><br>
+                        <strong>TSh ${labTotal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>
+                    </div>
+                </div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 2px solid #10b981;">
+                    <strong>Grand Total: TSh ${totalAmount.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>
+                </div>
+            `;
+        }
+
+        // Function to update payment totals in the form
+        function updatePaymentTotals() {
+            const medicineAmount = parseFloat($('input[name="medicine_amount"]').val()) || 0;
+            const labAmount = parseFloat($('input[name="lab_amount"]').val()) || 0;
+            const totalAmount = medicineAmount + labAmount;
+            
+            $('#medicineTotalDisplay').text('TSh ' + medicineAmount.toLocaleString('en-US', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
-            });
+            }));
+            
+            $('#labTotalDisplay').text('TSh ' + labAmount.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }));
+            
+            $('#grandTotalDisplay').text('TSh ' + totalAmount.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }));
         }
 
         // Function to toggle edit price form
@@ -2220,14 +2717,10 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             window.open('print_patient_prescriptions.php?patient_id=' + patientId, '_blank');
         }
 
-        // Function to print lab results
-        function printLabResults(patientId) {
-            window.open('../laboratory/print_lab_results.php?patient_id=' + patientId, '_blank');
-        }
-
         // Function to view patient details
         function viewPatientDetails(patientId) {
             alert('Viewing patient details: ' + patientId);
+            // You can implement a modal or redirect to patient details page
         }
 
         // Auto-remove alerts after 5 seconds
@@ -2258,12 +2751,33 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             <?php foreach ($pending_patients as $patient): ?>
             updateTotalAmount(<?php echo $patient['patient_id']; ?>);
             <?php endforeach; ?>
+
+            // Restore scroll position
+            const scrollPosition = sessionStorage.getItem('scrollPosition');
+            if (scrollPosition) {
+                window.scrollTo(0, parseInt(scrollPosition));
+                sessionStorage.removeItem('scrollPosition');
+            }
+
+            // Restore active tab
+            const activeTab = sessionStorage.getItem('activeTab');
+            if (activeTab) {
+                const tabs = document.querySelectorAll('.tab');
+                tabs.forEach(tab => {
+                    if (tab.textContent.trim() === activeTab) {
+                        tab.click();
+                    }
+                });
+                sessionStorage.removeItem('activeTab');
+            }
         });
 
-        // Save scroll position before form submission
-        document.addEventListener('submit', function() {
-            sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
+        // If editing payment, scroll to payments tab
+        <?php if ($editing_payment): ?>
+        document.addEventListener('DOMContentLoaded', function() {
+            showTab('payments');
         });
+        <?php endif; ?>
     </script>
 </body>
 </html>

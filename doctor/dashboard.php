@@ -212,7 +212,7 @@ $checking_forms = $pdo->query("SELECT cf.*, p.full_name as patient_name, p.card_
                              WHERE cf.doctor_id = " . $_SESSION['user_id'] . "
                              ORDER BY cf.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get laboratory test results for this doctor - GROUPED BY PATIENT
+// Get laboratory test results for this doctor - LIMITED for initial display
 $lab_results_limit = 6;
 $lab_results = $pdo->query("SELECT lt.*, p.full_name as patient_name, p.card_no, 
                            u.full_name as lab_technician, cf.symptoms, cf.diagnosis
@@ -224,32 +224,6 @@ $lab_results = $pdo->query("SELECT lt.*, p.full_name as patient_name, p.card_no,
                     AND lt.status = 'completed'
                     ORDER BY lt.updated_at DESC 
                     LIMIT $lab_results_limit")->fetchAll(PDO::FETCH_ASSOC);
-
-// Group lab results by patient
-$grouped_results = [];
-foreach ($lab_results as $result) {
-    $patient_key = $result['patient_name'] . '_' . $result['card_no'];
-    if (!isset($grouped_results[$patient_key])) {
-        $grouped_results[$patient_key] = [
-            'patient_name' => $result['patient_name'],
-            'card_no' => $result['card_no'],
-            'lab_technician' => $result['lab_technician'],
-            'latest_date' => $result['updated_at'],
-            'tests' => []
-        ];
-    }
-    $grouped_results[$patient_key]['tests'][] = $result;
-    
-    // Update latest date if this test is newer
-    if (strtotime($result['updated_at']) > strtotime($grouped_results[$patient_key]['latest_date'])) {
-        $grouped_results[$patient_key]['latest_date'] = $result['updated_at'];
-    }
-}
-
-// Sort grouped results by latest date
-usort($grouped_results, function($a, $b) {
-    return strtotime($b['latest_date']) - strtotime($a['latest_date']);
-});
 
 // Get total count for "See All"
 $total_results_stmt = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests lt 
@@ -858,7 +832,7 @@ $current_time = date('h:i A');
             font-size: 1.1rem;
         }
 
-        /* Laboratory Results Section - GROUPED BY PATIENT */
+        /* Laboratory Results Section - IMPROVED with Dropdown */
         .lab-results-section {
             margin-top: 30px;
         }
@@ -918,160 +892,178 @@ $current_time = date('h:i A');
             transform: translateY(-2px);
         }
         
-        .patient-results-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-            gap: 20px;
+        /* NEW: Dropdown Results Container */
+        .results-dropdown-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            overflow: hidden;
             margin-top: 20px;
         }
         
-        .patient-result-card {
+        .dropdown-header {
+            background: #f8fafc;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e2e8f0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+        
+        .dropdown-header:hover {
+            background: #f1f5f9;
+        }
+        
+        .dropdown-header.active {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .dropdown-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+        
+        .dropdown-icon {
+            transition: transform 0.3s ease;
+        }
+        
+        .dropdown-header.active .dropdown-icon {
+            transform: rotate(180deg);
+        }
+        
+        .dropdown-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease;
+        }
+        
+        .dropdown-content.active {
+            max-height: 1000px;
+        }
+        
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .result-card {
             background: white;
+            padding: 20px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
             border-left: 4px solid #10b981;
             transition: all 0.3s ease;
+            position: relative;
             overflow: hidden;
         }
         
-        .patient-result-card:hover {
+        .result-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #10b981, #3b82f6);
+        }
+        
+        .result-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 8px 30px rgba(0,0,0,0.15);
         }
         
-        .patient-result-header {
-            background: linear-gradient(135deg, #d1fae5, #10b981);
-            padding: 20px;
-            color: #065f46;
+        .result-header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
+            margin-bottom: 15px;
         }
         
-        .patient-info h4 {
-            margin: 0 0 5px 0;
-            font-size: 1.2rem;
+        .result-type {
+            font-weight: bold;
+            color: #1e293b;
+            font-size: 1.1rem;
             display: flex;
             align-items: center;
             gap: 8px;
         }
         
-        .patient-info p {
-            margin: 0;
-            font-size: 0.9rem;
-            opacity: 0.9;
+        .result-type i {
+            color: #3b82f6;
         }
         
-        .tests-count-badge {
-            background: #065f46;
-            color: white;
-            padding: 8px 12px;
+        .result-status {
+            padding: 4px 12px;
             border-radius: 20px;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 5px;
+            text-transform: uppercase;
+            background: #d1fae5;
+            color: #065f46;
         }
         
-        .patient-details {
-            padding: 15px 20px;
-            background: #f8fafc;
-            border-bottom: 1px solid #e2e8f0;
+        .result-info {
+            margin-bottom: 15px;
         }
         
-        .detail-row {
+        .info-row {
             display: flex;
             justify-content: space-between;
             margin-bottom: 8px;
             font-size: 0.9rem;
         }
         
-        .detail-label {
+        .info-label {
             color: #64748b;
             font-weight: 500;
         }
         
-        .detail-value {
+        .info-value {
             color: #1e293b;
             font-weight: 600;
         }
         
-        .tests-results {
-            padding: 20px;
+        .result-description {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+            color: #475569;
+            border-left: 3px solid #e2e8f0;
         }
         
-        .test-result-item {
-            background: #f8fafc;
+        .result-findings {
+            background: #ecfdf5;
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 15px;
-            border-left: 3px solid #3b82f6;
-        }
-        
-        .test-result-item:last-child {
-            margin-bottom: 0;
-        }
-        
-        .test-result-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        
-        .test-type {
-            font-weight: 600;
-            color: #1e293b;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .test-date {
-            color: #64748b;
-            font-size: 0.8rem;
-        }
-        
-        .test-description {
-            color: #64748b;
-            font-size: 0.85rem;
-            margin-bottom: 10px;
-        }
-        
-        .test-findings {
-            background: #ecfdf5;
-            padding: 12px;
-            border-radius: 6px;
-            margin-top: 10px;
-            border-left: 3px solid #10b981;
+            border-left: 4px solid #10b981;
         }
         
         .findings-label {
             font-weight: bold;
             color: #065f46;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             display: flex;
             align-items: center;
-            gap: 6px;
-            font-size: 0.85rem;
+            gap: 8px;
         }
         
-        .findings-content {
-            color: #065f46;
-            font-size: 0.85rem;
-            line-height: 1.4;
-        }
-        
-        .patient-actions {
-            padding: 15px 20px;
-            background: #f8fafc;
-            border-top: 1px solid #e2e8f0;
+        .action-buttons {
             display: flex;
             gap: 10px;
+            margin-top: 15px;
             flex-wrap: wrap;
         }
-
+        
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -1169,7 +1161,7 @@ $current_time = date('h:i A');
         
         .all-results-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
             gap: 20px;
         }
 
@@ -1320,7 +1312,7 @@ $current_time = date('h:i A');
                 gap: 15px;
             }
             
-            .patient-results-grid {
+            .results-grid {
                 grid-template-columns: 1fr;
             }
             
@@ -1539,7 +1531,7 @@ $current_time = date('h:i A');
             </div>
         </div>
 
-        <!-- Laboratory Results Section - GROUPED BY PATIENT -->
+        <!-- Laboratory Results Section - IMPROVED with Dropdown -->
         <div class="lab-results-section">
             <div class="table-card">
                 <div class="section-header">
@@ -1548,7 +1540,7 @@ $current_time = date('h:i A');
                     </h3>
                     <div class="section-actions">
                         <span class="results-count">
-                            <?php echo count($grouped_results); ?> of <?php echo $total_results; ?> patients
+                            <?php echo count($lab_results); ?> of <?php echo $total_results; ?>
                         </span>
                         <?php if ($total_results > $lab_results_limit): ?>
                         <button class="see-all-btn" onclick="showAllResults()">
@@ -1558,7 +1550,7 @@ $current_time = date('h:i A');
                     </div>
                 </div>
                 
-                <?php if (empty($grouped_results)): ?>
+                <?php if (empty($lab_results)): ?>
                     <div class="empty-state">
                         <i class="fas fa-vial"></i>
                         <h4>No Laboratory Results Available</h4>
@@ -1570,86 +1562,83 @@ $current_time = date('h:i A');
                         </div>
                     </div>
                 <?php else: ?>
-                    <div class="patient-results-grid">
-                        <?php foreach ($grouped_results as $patient_group): ?>
-                        <div class="patient-result-card">
-                            <!-- Patient Header -->
-                            <div class="patient-result-header">
-                                <div class="patient-info">
-                                    <h4>
-                                        <i class="fas fa-user-injured"></i>
-                                        <?php echo htmlspecialchars($patient_group['patient_name']); ?>
-                                    </h4>
-                                    <p>Card No: <?php echo htmlspecialchars($patient_group['card_no']); ?></p>
-                                </div>
-                                <div class="tests-count-badge">
-                                    <i class="fas fa-vial"></i>
-                                    <?php echo count($patient_group['tests']); ?> Tests
-                                </div>
+                    <!-- NEW: Dropdown Results Container -->
+                    <div class="results-dropdown-container">
+                        <div class="dropdown-header active" onclick="toggleResultsDropdown()">
+                            <div class="dropdown-title">
+                                <i class="fas fa-microscope"></i>
+                                Laboratory Test Results (<?php echo count($lab_results); ?>)
                             </div>
-                            
-                            <!-- Patient Details -->
-                            <div class="patient-details">
-                                <div class="detail-row">
-                                    <span class="detail-label">Lab Technician:</span>
-                                    <span class="detail-value"><?php echo htmlspecialchars($patient_group['lab_technician'] ?? 'Not specified'); ?></span>
-                                </div>
-                                <div class="detail-row">
-                                    <span class="detail-label">Latest Results:</span>
-                                    <span class="detail-value"><?php echo date('M j, Y H:i', strtotime($patient_group['latest_date'])); ?></span>
-                                </div>
+                            <div class="dropdown-icon">
+                                <i class="fas fa-chevron-down"></i>
                             </div>
-                            
-                            <!-- Tests Results -->
-                            <div class="tests-results">
-                                <?php foreach ($patient_group['tests'] as $test): ?>
-                                <div class="test-result-item">
-                                    <div class="test-result-header">
-                                        <div class="test-type">
+                        </div>
+                        <div class="dropdown-content active">
+                            <div class="results-grid">
+                                <?php foreach ($lab_results as $result): ?>
+                                <div class="result-card">
+                                    <div class="result-header">
+                                        <div class="result-type">
                                             <i class="fas fa-microscope"></i>
-                                            <?php echo htmlspecialchars($test['test_type']); ?>
+                                            <?php echo htmlspecialchars($result['test_type']); ?>
                                         </div>
-                                        <div class="test-date">
-                                            <?php echo date('M j, Y', strtotime($test['updated_at'])); ?>
+                                        <div class="result-status">Completed</div>
+                                    </div>
+                                    
+                                    <div class="result-info">
+                                        <div class="info-row">
+                                            <span class="info-label">Patient:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($result['patient_name']); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Card No:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($result['card_no']); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Lab Technician:</span>
+                                            <span class="info-value"><?php echo htmlspecialchars($result['lab_technician'] ?? 'Not specified'); ?></span>
+                                        </div>
+                                        <div class="info-row">
+                                            <span class="info-label">Completed Date:</span>
+                                            <span class="info-value"><?php echo date('M j, Y H:i', strtotime($result['updated_at'])); ?></span>
                                         </div>
                                     </div>
                                     
-                                    <?php if (!empty($test['test_description'])): ?>
-                                    <div class="test-description">
-                                        <?php echo htmlspecialchars($test['test_description']); ?>
+                                    <?php if (!empty($result['test_description'])): ?>
+                                    <div class="result-description">
+                                        <strong>Test Description:</strong><br>
+                                        <?php echo htmlspecialchars($result['test_description']); ?>
                                     </div>
                                     <?php endif; ?>
                                     
-                                    <?php if (!empty($test['results'])): ?>
-                                    <div class="test-findings">
+                                    <?php if (!empty($result['results'])): ?>
+                                    <div class="result-findings">
                                         <div class="findings-label">
-                                            <i class="fas fa-file-medical"></i>
+                                            <i class="fas fa-microscope"></i>
                                             Laboratory Findings:
                                         </div>
-                                        <div class="findings-content">
-                                            <?php echo htmlspecialchars($test['results']); ?>
+                                        <div style="color: #065f46; font-size: 0.9rem; line-height: 1.5;">
+                                            <?php 
+                                            $results = htmlspecialchars($result['results']);
+                                            if (strlen($results) > 150) {
+                                                echo substr($results, 0, 150) . '...';
+                                            } else {
+                                                echo $results;
+                                            }
+                                            ?>
                                         </div>
                                     </div>
-                                    <?php else: ?>
-                                    <div style="color: #64748b; font-size: 0.85rem; font-style: italic;">
-                                        No results available for this test.
-                                    </div>
                                     <?php endif; ?>
+                                    
+                                    <div class="action-buttons">
+                                        <button class="btn btn-primary" onclick="printTestResult(<?php echo $result['id']; ?>)">
+                                            <i class="fas fa-print"></i> Print Result
+                                        </button>
+                                    </div>
                                 </div>
                                 <?php endforeach; ?>
                             </div>
-                            
-                            <!-- Action Buttons -->
-                            <div class="patient-actions">
-                                <button class="btn btn-primary" onclick="printPatientResults('<?php echo htmlspecialchars($patient_group['patient_name']); ?>', '<?php echo htmlspecialchars($patient_group['card_no']); ?>')">
-                                    <i class="fas fa-print"></i> Print All Results
-                                </button>
-                                <button class="btn btn-info" onclick="viewPatientHistory('<?php echo htmlspecialchars($patient_group['patient_name']); ?>', '<?php echo htmlspecialchars($patient_group['card_no']); ?>')">
-                                    <i class="fas fa-history"></i> View History
-                                </button>
-                            </div>
                         </div>
-                        <?php endforeach; ?>
                     </div>
                     
                     <?php if ($total_results > $lab_results_limit): ?>
@@ -2224,6 +2213,16 @@ $current_time = date('h:i A');
             }
         });
 
+        // NEW: Function to toggle results dropdown
+        function toggleResultsDropdown() {
+            const header = document.querySelector('.dropdown-header');
+            const content = document.querySelector('.dropdown-content');
+            const icon = document.querySelector('.dropdown-icon');
+            
+            header.classList.toggle('active');
+            content.classList.toggle('active');
+        }
+
         // Function to show step content with ACTIONS
         function showStep(num) {
             // Remove active class from all steps
@@ -2489,14 +2488,10 @@ $current_time = date('h:i A');
             }
         }
 
-        // Function to print patient results
-        function printPatientResults(patientName, cardNo) {
-            window.open('print_patient_results.php?patient=' + encodeURIComponent(patientName) + '&card=' + encodeURIComponent(cardNo), '_blank');
-        }
-
-        // Function to view patient history
-        function viewPatientHistory(patientName, cardNo) {
-            alert('Viewing medical history for: ' + patientName + ' (Card: ' + cardNo + ')\nThis would show complete patient medical history.');
+        // Function to view full result
+        function viewFullResult(testId) {
+            // You can implement a detailed view modal here
+            alert('Viewing full details for test ID: ' + testId + '\nThis would show complete results in a detailed view.');
         }
 
         // Function to print test result

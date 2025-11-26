@@ -16,7 +16,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'receptionist') {
 $success_message = '';
 $error_message = '';
 
-// Handle Add Patient
+// Handle Add Patient - FIXED VERSION (without created_by column)
 if (isset($_POST['add_patient'])) {
     $card_no = $_POST['card_no'];
     $full_name = $_POST['full_name'];
@@ -25,6 +25,8 @@ if (isset($_POST['add_patient'])) {
     $weight = $_POST['weight'];
     $phone = $_POST['phone'];
     $address = $_POST['address'];
+    $patient_type = $_POST['patient_type'];
+    $consultation_fee = $_POST['consultation_fee'];
     
     try {
         // Check if card number already exists
@@ -34,17 +36,24 @@ if (isset($_POST['add_patient'])) {
         if ($check_stmt->fetch()) {
             $error_message = "Patient with this card number already exists!";
         } else {
-            $stmt = $pdo->prepare("INSERT INTO patients (card_no, full_name, age, gender, weight, phone, address, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$card_no, $full_name, $age, $gender, $weight, $phone, $address, $_SESSION['user_id']]);
+            // FIXED: Remove created_by from INSERT statement
+            $stmt = $pdo->prepare("INSERT INTO patients (card_no, full_name, age, gender, weight, phone, address, patient_type, consultation_fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$card_no, $full_name, $age, $gender, $weight, $phone, $address, $patient_type, $consultation_fee]);
             
-            $success_message = "Patient added successfully!";
+            // Create payment record for consultation fee WITHOUT checking_form_id
+            if ($consultation_fee > 0) {
+                $payment_stmt = $pdo->prepare("INSERT INTO payments (patient_id, amount, payment_type, status) VALUES (?, ?, 'consultation', 'pending')");
+                $payment_stmt->execute([$pdo->lastInsertId(), $consultation_fee]);
+            }
+            
+            $success_message = "Patient added successfully!" . ($consultation_fee > 0 ? " Consultation fee: TSh " . number_format($consultation_fee, 2) : "");
         }
     } catch (PDOException $e) {
         $error_message = "Error adding patient: " . $e->getMessage();
     }
 }
 
-// Handle Update Patient
+// Handle Update Patient - FIXED VERSION
 if (isset($_POST['update_patient'])) {
     $patient_id = $_POST['patient_id'];
     $full_name = $_POST['full_name'];
@@ -53,28 +62,94 @@ if (isset($_POST['update_patient'])) {
     $weight = $_POST['weight'];
     $phone = $_POST['phone'];
     $address = $_POST['address'];
+    $patient_type = $_POST['patient_type'];
+    $consultation_fee = $_POST['consultation_fee'];
     
     try {
-        $stmt = $pdo->prepare("UPDATE patients SET full_name = ?, age = ?, gender = ?, weight = ?, phone = ?, address = ? WHERE id = ?");
-        $stmt->execute([$full_name, $age, $gender, $weight, $phone, $address, $patient_id]);
+        $stmt = $pdo->prepare("UPDATE patients SET full_name = ?, age = ?, gender = ?, weight = ?, phone = ?, address = ?, patient_type = ?, consultation_fee = ? WHERE id = ?");
+        $stmt->execute([$full_name, $age, $gender, $weight, $phone, $address, $patient_type, $consultation_fee, $patient_id]);
         
-        $success_message = "Patient information updated successfully!";
+        // Update payment record if consultation fee exists - FIXED: Don't include checking_form_id
+        if ($consultation_fee > 0) {
+            $check_payment_stmt = $pdo->prepare("SELECT id FROM payments WHERE patient_id = ? AND payment_type = 'consultation'");
+            $check_payment_stmt->execute([$patient_id]);
+            $existing_payment = $check_payment_stmt->fetch(PDO::FETCH_ASSOC);
+            
+            if ($existing_payment) {
+                $update_payment_stmt = $pdo->prepare("UPDATE payments SET amount = ? WHERE id = ? AND patient_id = ?");
+                $update_payment_stmt->execute([$consultation_fee, $existing_payment['id'], $patient_id]);
+            } else {
+                $payment_stmt = $pdo->prepare("INSERT INTO payments (patient_id, amount, payment_type, status) VALUES (?, ?, 'consultation', 'pending')");
+                $payment_stmt->execute([$patient_id, $consultation_fee]);
+            }
+        }
+        
+        $success_message = "Patient information updated successfully!" . ($consultation_fee > 0 ? " Consultation fee updated to: TSh " . number_format($consultation_fee, 2) : "");
     } catch (PDOException $e) {
         $error_message = "Error updating patient: " . $e->getMessage();
     }
 }
 
-// Handle Delete Patient
+// Handle Delete Patient - FIXED VERSION
 if (isset($_POST['delete_patient'])) {
     $patient_id = $_POST['patient_id'];
     
     try {
+        // First, set checking_form_id to NULL for payments to avoid foreign key constraint
+        $nullify_payments_stmt = $pdo->prepare("UPDATE payments SET checking_form_id = NULL WHERE patient_id = ?");
+        $nullify_payments_stmt->execute([$patient_id]);
+        
+        // Then delete payments
+        $delete_payments_stmt = $pdo->prepare("DELETE FROM payments WHERE patient_id = ?");
+        $delete_payments_stmt->execute([$patient_id]);
+        
+        // Then delete patient
         $stmt = $pdo->prepare("DELETE FROM patients WHERE id = ?");
         $stmt->execute([$patient_id]);
         
         $success_message = "Patient deleted successfully!";
     } catch (PDOException $e) {
         $error_message = "Error deleting patient: " . $e->getMessage();
+    }
+}
+
+// Handle Consultation Fee Settings
+if (isset($_POST['update_fee_settings'])) {
+    $standard_fee = $_POST['standard_fee'];
+    $child_fee = $_POST['child_fee'];
+    $senior_fee = $_POST['senior_fee'];
+    $emergency_fee = $_POST['emergency_fee'];
+    $follow_up_fee = $_POST['follow_up_fee'];
+    
+    try {
+        // Store fee settings in a settings table or update existing
+        $check_settings_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM settings WHERE setting_key LIKE 'consultation_fee_%'");
+        $check_settings_stmt->execute();
+        
+        $settings = [
+            'consultation_fee_standard' => $standard_fee,
+            'consultation_fee_child' => $child_fee,
+            'consultation_fee_senior' => $senior_fee,
+            'consultation_fee_emergency' => $emergency_fee,
+            'consultation_fee_follow_up' => $follow_up_fee
+        ];
+        
+        foreach ($settings as $key => $value) {
+            $check_stmt = $pdo->prepare("SELECT id FROM settings WHERE setting_key = ?");
+            $check_stmt->execute([$key]);
+            
+            if ($check_stmt->fetch()) {
+                $update_stmt = $pdo->prepare("UPDATE settings SET setting_value = ? WHERE setting_key = ?");
+                $update_stmt->execute([$value, $key]);
+            } else {
+                $insert_stmt = $pdo->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)");
+                $insert_stmt->execute([$key, $value]);
+            }
+        }
+        
+        $success_message = "Consultation fee settings updated successfully!";
+    } catch (PDOException $e) {
+        $error_message = "Error updating fee settings: " . $e->getMessage();
     }
 }
 
@@ -85,6 +160,7 @@ if (isset($_POST['update_profile'])) {
     $phone = $_POST['phone'];
     $current_password = $_POST['current_password'];
     $new_password = $_POST['new_password'];
+    $confirm_password = $_POST['confirm_password'];
     
     try {
         // Update basic profile info
@@ -93,18 +169,22 @@ if (isset($_POST['update_profile'])) {
         
         // Update password if provided
         if (!empty($current_password) && !empty($new_password)) {
-            // Verify current password
-            $user_stmt = $pdo->prepare("SELECT password FROM users WHERE id = ?");
-            $user_stmt->execute([$_SESSION['user_id']]);
-            $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($user && password_verify($current_password, $user['password'])) {
-                $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                $pwd_stmt = $pdo->prepare("UPDATE users SET password = ? WHERE id = ?");
-                $pwd_stmt->execute([$hashed_password, $_SESSION['user_id']]);
-                $success_message = "Profile and password updated successfully!";
+            if ($new_password !== $confirm_password) {
+                $error_message = "New passwords do not match!";
             } else {
-                $error_message = "Current password is incorrect!";
+                // Verify current password
+                $user_stmt = $pdo->prepare("SELECT password FROM users WHERE id = ?");
+                $user_stmt->execute([$_SESSION['user_id']]);
+                $user = $user_stmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($user && password_verify($current_password, $user['password'])) {
+                    $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+                    $pwd_stmt = $pdo->prepare("UPDATE users SET password = ? WHERE id = ?");
+                    $pwd_stmt->execute([$hashed_password, $_SESSION['user_id']]);
+                    $success_message = "Profile and password updated successfully!";
+                } else {
+                    $error_message = "Current password is incorrect!";
+                }
             }
         } else {
             $success_message = "Profile updated successfully!";
@@ -131,6 +211,34 @@ $today_count = $today_count_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 // Get total patient count
 $total_count_stmt = $pdo->query("SELECT COUNT(*) as count FROM patients");
 $total_count = $total_count_stmt->fetch(PDO::FETCH_ASSOC)['count'];
+
+// Get total consultation fees pending
+$pending_fees_stmt = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE payment_type = 'consultation' AND status = 'pending'");
+$pending_fees = $pending_fees_stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+// Get consultation fee settings
+$fee_settings = [];
+$settings_stmt = $pdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key LIKE 'consultation_fee_%'");
+$settings_data = $settings_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+foreach ($settings_data as $setting) {
+    $fee_settings[$setting['setting_key']] = $setting['setting_value'];
+}
+
+// Set default fees if not exists
+$default_fees = [
+    'consultation_fee_standard' => 10000,
+    'consultation_fee_child' => 5000,
+    'consultation_fee_senior' => 7000,
+    'consultation_fee_emergency' => 15000,
+    'consultation_fee_follow_up' => 8000
+];
+
+foreach ($default_fees as $key => $default_value) {
+    if (!isset($fee_settings[$key])) {
+        $fee_settings[$key] = $default_value;
+    }
+}
 
 // Get current user data
 $user_stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
@@ -324,6 +432,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
         
         .stat-card.total { border-left-color: #3b82f6; }
         .stat-card.today { border-left-color: #10b981; }
+        .stat-card.fees { border-left-color: #f59e0b; }
         
         .stat-icon {
             font-size: 2.2em;
@@ -332,6 +441,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
         
         .stat-card.total .stat-icon { color: #3b82f6; }
         .stat-card.today .stat-icon { color: #10b981; }
+        .stat-card.fees .stat-icon { color: #f59e0b; }
         
         .stat-number {
             font-size: 2.2em;
@@ -561,6 +671,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
         .badge-danger { background: #fee2e2; color: #991b1b; }
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-warning { background: #fef3c7; color: #92400e; }
+        .badge-purple { background: #f3e8ff; color: #7c3aed; }
 
         /* Table responsive container */
         .table-responsive {
@@ -684,6 +795,33 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             font-size: 0.8rem;
             color: #64748b;
             line-height: 1.4;
+        }
+
+        /* Consultation Fee Settings */
+        .fee-settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .fee-setting-card {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #f59e0b;
+        }
+        
+        .fee-type {
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 5px;
+        }
+        
+        .fee-amount {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #059669;
         }
 
         /* DataTables Customization */
@@ -837,6 +975,10 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             .action-buttons {
                 flex-direction: column;
             }
+            
+            .fee-settings-grid {
+                grid-template-columns: 1fr;
+            }
         }
         
         @media (max-width: 480px) {
@@ -907,7 +1049,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                     <i class="fas fa-tachometer-alt"></i>
                     Receptionist Dashboard
                 </h1>
-                <p style="color: #64748b; margin-top: 5px;">Manage patient registration and information</p>
+                <p style="color: #64748b; margin-top: 5px;">Manage patient registration and consultation fees</p>
             </div>
             <div class="page-actions">
                 <button onclick="refreshPage()" class="btn btn-warning">
@@ -924,11 +1066,19 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                 <div class="step-icon">
                     <i class="fas fa-users"></i>
                 </div>
-                <div class="step-title">User Management</div>
-                <div class="step-desc">Add & Update Patients Information</div>
+                <div class="step-title">Patient Management</div>
+                <div class="step-desc">Add & Update Patients with Consultation Fees</div>
+            </div>
+            <div class="process-step" onclick="showFeeSettings()">
+                <div class="step-number">2</div>
+                <div class="step-icon">
+                    <i class="fas fa-money-bill-wave"></i>
+                </div>
+                <div class="step-title">Fee Settings</div>
+                <div class="step-desc">Manage Consultation Fee Rates</div>
             </div>
             <div class="process-step" onclick="showPersonalSettings()">
-                <div class="step-number">2</div>
+                <div class="step-number">3</div>
                 <div class="step-icon">
                     <i class="fas fa-user-cog"></i>
                 </div>
@@ -965,6 +1115,13 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                 </div>
                 <div class="stat-number"><?php echo $today_count; ?></div>
                 <div class="stat-label">Today's Registrations</div>
+            </div>
+            <div class="stat-card fees">
+                <div class="stat-icon">
+                    <i class="fas fa-money-bill"></i>
+                </div>
+                <div class="stat-number">TSh <?php echo number_format($pending_fees, 0); ?></div>
+                <div class="stat-label">Pending Consultation Fees</div>
             </div>
         </div>
 
@@ -1015,8 +1172,27 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                             <textarea name="address" class="form-input" placeholder="Enter address" rows="3"></textarea>
                         </div>
                         
+                        <div class="form-group">
+                            <label class="form-label">Patient Type *</label>
+                            <select name="patient_type" class="form-select" id="patientType" onchange="updateConsultationFee()" required>
+                                <option value="">Select Patient Type</option>
+                                <option value="standard">Standard</option>
+                                <option value="child">Child (Under 12)</option>
+                                <option value="senior">Senior (Over 60)</option>
+                                <option value="emergency">Emergency</option>
+                                <option value="follow_up">Follow-up</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Consultation Fee (TSh) *</label>
+                            <input type="number" name="consultation_fee" class="form-input" id="consultationFee" 
+                                   placeholder="Enter consultation fee" min="0" step="100" required>
+                            <small style="color: #64748b; font-size: 0.8rem;">Based on patient type. You can adjust if needed.</small>
+                        </div>
+                        
                         <button type="submit" name="add_patient" class="btn btn-success">
-                            <i class="fas fa-save"></i> Add Patient
+                            <i class="fas fa-save"></i> Add Patient & Set Fee
                         </button>
                     </form>
                 </div>
@@ -1071,8 +1247,26 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                             <textarea name="address" class="form-input" id="updateAddress" rows="3"></textarea>
                         </div>
                         
+                        <div class="form-group">
+                            <label class="form-label">Patient Type *</label>
+                            <select name="patient_type" class="form-select" id="updatePatientType" required>
+                                <option value="">Select Patient Type</option>
+                                <option value="standard">Standard</option>
+                                <option value="child">Child (Under 12)</option>
+                                <option value="senior">Senior (Over 60)</option>
+                                <option value="emergency">Emergency</option>
+                                <option value="follow_up">Follow-up</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Consultation Fee (TSh) *</label>
+                            <input type="number" name="consultation_fee" class="form-input" id="updateConsultationFee" 
+                                   placeholder="Enter consultation fee" min="0" step="100" required>
+                        </div>
+                        
                         <button type="submit" name="update_patient" class="btn btn-primary">
-                            <i class="fas fa-sync"></i> Update Patient
+                            <i class="fas fa-sync"></i> Update Patient & Fee
                         </button>
                     </form>
                 </div>
@@ -1096,9 +1290,9 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                                 <th>Full Name</th>
                                 <th>Age</th>
                                 <th>Gender</th>
-                                <th>Weight (kg)</th>
+                                <th>Type</th>
+                                <th>Consultation Fee</th>
                                 <th>Phone</th>
-                                <th>Address</th>
                                 <th>Registration Date</th>
                                 <th>Actions</th>
                             </tr>
@@ -1122,9 +1316,20 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                                             <?php echo $patient['gender'] ? ucfirst($patient['gender']) : 'N/A'; ?>
                                         </span>
                                     </td>
-                                    <td><?php echo $patient['weight'] ?: 'N/A'; ?></td>
+                                    <td>
+                                        <span class="badge <?php 
+                                            echo $patient['patient_type'] == 'standard' ? 'badge-success' : 
+                                                 ($patient['patient_type'] == 'child' ? 'badge-info' : 
+                                                 ($patient['patient_type'] == 'senior' ? 'badge-warning' : 
+                                                 ($patient['patient_type'] == 'emergency' ? 'badge-danger' : 'badge-purple'))); 
+                                        ?>">
+                                            <?php echo $patient['patient_type'] ? ucfirst(str_replace('_', ' ', $patient['patient_type'])) : 'Standard'; ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <strong style="color: #059669;">TSh <?php echo number_format($patient['consultation_fee'] ?? 0, 2); ?></strong>
+                                    </td>
                                     <td><?php echo $patient['phone'] ?: 'N/A'; ?></td>
-                                    <td><?php echo $patient['address'] ? htmlspecialchars(substr($patient['address'], 0, 30)) . (strlen($patient['address']) > 30 ? '...' : '') : 'N/A'; ?></td>
                                     <td><?php echo date('M j, Y', strtotime($patient['created_at'])); ?></td>
                                     <td>
                                         <div class="action-buttons">
@@ -1145,7 +1350,83 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             </div>
         </div>
 
-        <!-- Personal Settings Section (Step 2) -->
+        <!-- Fee Settings Section (Step 2) -->
+        <div id="feeSettingsSection" style="display: none;">
+            <div class="form-card">
+                <h3><i class="fas fa-money-bill-wave"></i> Consultation Fee Settings</h3>
+                
+                <div class="fee-settings-grid">
+                    <div class="fee-setting-card">
+                        <div class="fee-type">Standard Consultation</div>
+                        <div class="fee-amount">TSh <?php echo number_format($fee_settings['consultation_fee_standard'], 2); ?></div>
+                        <small>Regular patient consultation</small>
+                    </div>
+                    
+                    <div class="fee-setting-card">
+                        <div class="fee-type">Child Consultation (Under 12)</div>
+                        <div class="fee-amount">TSh <?php echo number_format($fee_settings['consultation_fee_child'], 2); ?></div>
+                        <small>Patients under 12 years</small>
+                    </div>
+                    
+                    <div class="fee-setting-card">
+                        <div class="fee-type">Senior Consultation (Over 60)</div>
+                        <div class="fee-amount">TSh <?php echo number_format($fee_settings['consultation_fee_senior'], 2); ?></div>
+                        <small>Patients over 60 years</small>
+                    </div>
+                    
+                    <div class="fee-setting-card">
+                        <div class="fee-type">Emergency Consultation</div>
+                        <div class="fee-amount">TSh <?php echo number_format($fee_settings['consultation_fee_emergency'], 2); ?></div>
+                        <small>Emergency cases</small>
+                    </div>
+                    
+                    <div class="fee-setting-card">
+                        <div class="fee-type">Follow-up Consultation</div>
+                        <div class="fee-amount">TSh <?php echo number_format($fee_settings['consultation_fee_follow_up'], 2); ?></div>
+                        <small>Follow-up visits</small>
+                    </div>
+                </div>
+
+                <form method="POST" action="">
+                    <h4 style="margin: 25px 0 15px 0; color: #374151; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px;">
+                        <i class="fas fa-cog"></i> Update Fee Rates
+                    </h4>
+                    
+                    <div class="forms-grid">
+                        <div class="form-group">
+                            <label class="form-label">Standard Fee (TSh)</label>
+                            <input type="number" name="standard_fee" class="form-input" value="<?php echo $fee_settings['consultation_fee_standard']; ?>" min="0" step="100" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Child Fee (TSh)</label>
+                            <input type="number" name="child_fee" class="form-input" value="<?php echo $fee_settings['consultation_fee_child']; ?>" min="0" step="100" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Senior Fee (TSh)</label>
+                            <input type="number" name="senior_fee" class="form-input" value="<?php echo $fee_settings['consultation_fee_senior']; ?>" min="0" step="100" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Emergency Fee (TSh)</label>
+                            <input type="number" name="emergency_fee" class="form-input" value="<?php echo $fee_settings['consultation_fee_emergency']; ?>" min="0" step="100" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Follow-up Fee (TSh)</label>
+                            <input type="number" name="follow_up_fee" class="form-input" value="<?php echo $fee_settings['consultation_fee_follow_up']; ?>" min="0" step="100" required>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" name="update_fee_settings" class="btn btn-warning">
+                        <i class="fas fa-save"></i> Update Fee Settings
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Personal Settings Section (Step 3) -->
         <div id="personalSettingsSection" style="display: none;">
             <div class="forms-grid">
                 <div class="form-card">
@@ -1197,12 +1478,19 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                             <div class="stat-number"><?php echo $today_count; ?></div>
                             <div class="stat-label">Patients Registered Today</div>
                         </div>
-                        <div class="stat-card total">
+                        <div class="stat-card total" style="margin-bottom: 15px;">
                             <div class="stat-icon">
                                 <i class="fas fa-users"></i>
                             </div>
                             <div class="stat-number"><?php echo $total_count; ?></div>
                             <div class="stat-label">Total Patients Registered</div>
+                        </div>
+                        <div class="stat-card fees">
+                            <div class="stat-icon">
+                                <i class="fas fa-money-bill"></i>
+                            </div>
+                            <div class="stat-number">TSh <?php echo number_format($pending_fees, 0); ?></div>
+                            <div class="stat-label">Pending Consultation Fees</div>
                         </div>
                     </div>
                 </div>
@@ -1236,6 +1524,15 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
     <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
     
     <script>
+        // Consultation fee rates
+        const feeRates = {
+            'standard': <?php echo $fee_settings['consultation_fee_standard']; ?>,
+            'child': <?php echo $fee_settings['consultation_fee_child']; ?>,
+            'senior': <?php echo $fee_settings['consultation_fee_senior']; ?>,
+            'emergency': <?php echo $fee_settings['consultation_fee_emergency']; ?>,
+            'follow_up': <?php echo $fee_settings['consultation_fee_follow_up']; ?>
+        };
+
         // Initialize DataTable
         $(document).ready(function() {
             $('#patientsTable').DataTable({
@@ -1259,6 +1556,18 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                 ]
             });
         });
+
+        // Update consultation fee based on patient type
+        function updateConsultationFee() {
+            const patientType = document.getElementById('patientType').value;
+            const consultationFeeInput = document.getElementById('consultationFee');
+            
+            if (patientType && feeRates[patientType]) {
+                consultationFeeInput.value = feeRates[patientType];
+            } else {
+                consultationFeeInput.value = '';
+            }
+        }
 
         // Update time every minute
         function updateTime() {
@@ -1300,6 +1609,8 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                 document.getElementById('updateWeight').value = '';
                 document.getElementById('updatePhone').value = '';
                 document.getElementById('updateAddress').value = '';
+                document.getElementById('updatePatientType').value = '';
+                document.getElementById('updateConsultationFee').value = '';
                 return;
             }
             
@@ -1315,6 +1626,8 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                 document.getElementById('updateWeight').value = patient.weight || '';
                 document.getElementById('updatePhone').value = patient.phone || '';
                 document.getElementById('updateAddress').value = patient.address || '';
+                document.getElementById('updatePatientType').value = patient.patient_type || 'standard';
+                document.getElementById('updateConsultationFee').value = patient.consultation_fee || feeRates.standard;
             }
         }
 
@@ -1359,6 +1672,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
         // Process Steps Navigation
         function showUserManagement() {
             document.getElementById('userManagementSection').style.display = 'block';
+            document.getElementById('feeSettingsSection').style.display = 'none';
             document.getElementById('personalSettingsSection').style.display = 'none';
             
             // Update active step
@@ -1368,9 +1682,10 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             document.querySelectorAll('.process-step')[0].classList.add('active');
         }
 
-        function showPersonalSettings() {
+        function showFeeSettings() {
             document.getElementById('userManagementSection').style.display = 'none';
-            document.getElementById('personalSettingsSection').style.display = 'block';
+            document.getElementById('feeSettingsSection').style.display = 'block';
+            document.getElementById('personalSettingsSection').style.display = 'none';
             
             // Update active step
             document.querySelectorAll('.process-step').forEach(step => {
@@ -1379,15 +1694,42 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             document.querySelectorAll('.process-step')[1].classList.add('active');
         }
 
+        function showPersonalSettings() {
+            document.getElementById('userManagementSection').style.display = 'none';
+            document.getElementById('feeSettingsSection').style.display = 'none';
+            document.getElementById('personalSettingsSection').style.display = 'block';
+            
+            // Update active step
+            document.querySelectorAll('.process-step').forEach(step => {
+                step.classList.remove('active');
+            });
+            document.querySelectorAll('.process-step')[2].classList.add('active');
+        }
+
         // Form validation
-        document.querySelector('form').addEventListener('submit', function(e) {
-            const cardNo = document.querySelector('input[name="card_no"]');
-            if (cardNo && !cardNo.value.trim()) {
-                e.preventDefault();
-                alert('Please enter a card number!');
-                cardNo.focus();
-                return false;
-            }
+        document.addEventListener('DOMContentLoaded', function() {
+            const forms = document.querySelectorAll('form');
+            forms.forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    const cardNo = this.querySelector('input[name="card_no"]');
+                    if (cardNo && !cardNo.value.trim()) {
+                        e.preventDefault();
+                        alert('Please enter a card number!');
+                        cardNo.focus();
+                        return false;
+                    }
+                    
+                    // Password confirmation validation
+                    const newPassword = this.querySelector('input[name="new_password"]');
+                    const confirmPassword = this.querySelector('input[name="confirm_password"]');
+                    if (newPassword && confirmPassword && newPassword.value !== confirmPassword.value) {
+                        e.preventDefault();
+                        alert('New passwords do not match!');
+                        newPassword.focus();
+                        return false;
+                    }
+                });
+            });
         });
     </script>
 </body>
