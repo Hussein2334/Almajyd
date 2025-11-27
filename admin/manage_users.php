@@ -245,87 +245,6 @@ $current_time = date('h:i A');
             transform: translateY(-2px);
         }
 
-        /* Navigation Steps */
-        .nav-steps {
-            background: white;
-            padding: 20px 30px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            border-bottom: 1px solid #e2e8f0;
-        }
-        
-        .steps-container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        .steps {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        
-        .steps::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50px;
-            right: 50px;
-            height: 3px;
-            background: #e2e8f0;
-            border-radius: 3px;
-            z-index: 1;
-        }
-        
-        .step {
-            width: 50px;
-            height: 50px;
-            background: white;
-            border: 3px solid #e2e8f0;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 18px;
-            color: #64748b;
-            z-index: 2;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            text-decoration: none;
-        }
-        
-        .step:hover {
-            transform: scale(1.1);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        }
-        
-        .step.active {
-            border-color: #10b981;
-            color: white;
-            background: #10b981;
-            box-shadow: 0 0 15px rgba(16,185,129,0.4);
-        }
-        
-        .step-label {
-            position: absolute;
-            top: 100%;
-            margin-top: 8px;
-            font-size: 11px;
-            font-weight: 600;
-            color: #475569;
-            white-space: nowrap;
-        }
-        
-        .spacer { 
-            flex-grow: 1; 
-            min-width: 30px; 
-        }
-
         /* Main Content */
         .main { 
             padding: 25px; 
@@ -732,32 +651,6 @@ $current_time = date('h:i A');
                 justify-content: space-between;
             }
             
-            .nav-steps {
-                padding: 15px 20px;
-            }
-            
-            .steps::before {
-                display: none;
-            }
-            
-            .steps {
-                justify-content: space-around;
-            }
-            
-            .spacer {
-                display: none;
-            }
-            
-            .step {
-                width: 45px;
-                height: 45px;
-                font-size: 16px;
-            }
-            
-            .step-label {
-                font-size: 10px;
-            }
-            
             .main {
                 padding: 15px;
             }
@@ -813,20 +706,6 @@ $current_time = date('h:i A');
             .back-btn {
                 width: 100%;
                 justify-content: center;
-            }
-            
-            .steps {
-                gap: 5px;
-            }
-            
-            .step {
-                width: 40px;
-                height: 40px;
-                font-size: 14px;
-            }
-            
-            .step-label {
-                font-size: 9px;
             }
             
             .form-container,
@@ -887,38 +766,6 @@ $current_time = date('h:i A');
                 <i class="fas fa-sign-out-alt"></i>
                 Logout
             </a>
-        </div>
-    </div>
-
-    <!-- PERSISTENT NAVIGATION STEPS -->
-    <div class="nav-steps">
-        <div class="steps-container">
-            <div class="steps">
-                <a href="dashboard.php" class="step">
-                    1
-                    <div class="step-label">Dashboard</div>
-                </a>
-                <div class="spacer"></div>
-                <a href="manage_users.php" class="step active">
-                    2
-                    <div class="step-label">Users</div>
-                </a>
-                <div class="spacer"></div>
-                <a href="view_patients.php" class="step">
-                    3
-                    <div class="step-label">Patients</div>
-                </a>
-                <div class="spacer"></div>
-                <a href="reports.php" class="step">
-                    4
-                    <div class="step-label">Reports</div>
-                </a>
-                <div class="spacer"></div>
-                <a href="system_settings.php" class="step">
-                    5
-                    <div class="step-label">System</div>
-                </a>
-            </div>
         </div>
     </div>
 

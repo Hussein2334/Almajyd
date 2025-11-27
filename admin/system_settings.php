@@ -269,90 +269,6 @@ $last_update = isset($user['updated_at']) && !empty($user['updated_at']) ?
             flex-wrap: wrap;
         }
 
-        /* PERSISTENT NAVIGATION STEPS */
-        .steps-container {
-            background: white;
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            margin-bottom: 30px;
-        }
-        
-        .steps-title {
-            text-align: center;
-            margin-bottom: 25px;
-            color: #1e293b;
-            font-size: 1.4rem;
-        }
-        
-        .steps {
-            display: flex;
-            align-items: center;
-            margin: 30px 0;
-            position: relative;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        
-        .steps::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50px;
-            right: 50px;
-            height: 3px;
-            background: #e2e8f0;
-            border-radius: 3px;
-            z-index: 1;
-        }
-        
-        .step {
-            width: 60px;
-            height: 60px;
-            background: white;
-            border: 3px solid #e2e8f0;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 20px;
-            color: #64748b;
-            z-index: 2;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-        
-        .step:hover {
-            transform: scale(1.1);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.15);
-        }
-        
-        .step.active {
-            border-color: #10b981;
-            color: white;
-            background: #10b981;
-            box-shadow: 0 0 15px rgba(16,185,129,0.4);
-        }
-        
-        .step-label {
-            position: absolute;
-            top: 100%;
-            margin-top: 8px;
-            font-size: 12px;
-            font-weight: 600;
-            color: #475569;
-            white-space: nowrap;
-        }
-        
-        .spacer { 
-            flex-grow: 1; 
-            min-width: 30px; 
-        }
-
         /* Messages */
         .alert {
             padding: 15px 20px;
@@ -586,28 +502,6 @@ $last_update = isset($user['updated_at']) && !empty($user['updated_at']) ?
                 justify-content: center;
             }
             
-            .steps::before {
-                display: none;
-            }
-            
-            .steps {
-                justify-content: space-around;
-            }
-            
-            .spacer {
-                display: none;
-            }
-            
-            .step {
-                width: 50px;
-                height: 50px;
-                font-size: 16px;
-            }
-            
-            .step-label {
-                font-size: 10px;
-            }
-            
             .settings-grid {
                 grid-template-columns: 1fr;
             }
@@ -707,43 +601,16 @@ $last_update = isset($user['updated_at']) && !empty($user['updated_at']) ?
             </div>
         <?php endif; ?>
 
-        <!-- PERSISTENT NAVIGATION STEPS -->
-        <div class="steps-container">
-            <h2 class="steps-title">Admin Control Panel</h2>
-            
-            <div class="steps">
-                <div class="step" onclick="window.location.href='dashboard.php'">
-                    1
-                    <div class="step-label">Dashboard</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="window.location.href='view_patients.php'">
-                    2
-                    <div class="step-label">Patients</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="window.location.href='patient_reports.php'">
-                    3
-                    <div class="step-label">Reports</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step active">
-                    4
-                    <div class="step-label">My Settings</div>
-                </div>
+        <!-- Profile Overview -->
+        <div class="profile-info">
+            <div class="profile-avatar">
+                <?php echo strtoupper(substr($user['full_name'], 0, 1)); ?>
             </div>
-
-            <!-- Profile Overview -->
-            <div class="profile-info">
-                <div class="profile-avatar">
-                    <?php echo strtoupper(substr($user['full_name'], 0, 1)); ?>
-                </div>
-                <div class="profile-details">
-                    <h4><?php echo htmlspecialchars($user['full_name']); ?></h4>
-                    <p><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($user['email']); ?></p>
-                    <p><i class="fas fa-user-tag"></i> Administrator</p>
-                    <p><i class="fas fa-calendar"></i> Member since: <?php echo date('M j, Y', strtotime($user['created_at'])); ?></p>
-                </div>
+            <div class="profile-details">
+                <h4><?php echo htmlspecialchars($user['full_name']); ?></h4>
+                <p><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($user['email']); ?></p>
+                <p><i class="fas fa-user-tag"></i> Administrator</p>
+                <p><i class="fas fa-calendar"></i> Member since: <?php echo date('M j, Y', strtotime($user['created_at'])); ?></p>
             </div>
         </div>
 

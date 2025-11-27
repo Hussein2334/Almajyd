@@ -101,7 +101,9 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Patients - Almajyd Dispensary</title>
-     <link rel="icon" href="../images/logo.jpg">
+    <link rel="icon" href="../images/logo.jpg">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
     <style>
         * { 
             margin: 0; 
@@ -283,166 +285,16 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             font-weight: 500;
         }
 
-        /* Clickable Process Steps */
-        .steps-container {
-            background: white;
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            margin-bottom: 30px;
-        }
-        
-        .steps-title {
-            text-align: center;
-            margin-bottom: 25px;
-            color: #1e293b;
-            font-size: 1.4rem;
-        }
-        
-        .steps {
-            display: flex;
-            align-items: center;
-            margin: 30px 0;
-            position: relative;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        
-        .steps::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50px;
-            right: 50px;
-            height: 3px;
-            background: #e2e8f0;
-            border-radius: 3px;
-            z-index: 1;
-        }
-        
-        .step {
-            width: 60px;
-            height: 60px;
-            background: white;
-            border: 3px solid #e2e8f0;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 20px;
-            color: #64748b;
-            z-index: 2;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-        
-        .step:hover {
-            transform: scale(1.1);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.15);
-        }
-        
-        .step.active {
-            border-color: #10b981;
-            color: white;
-            background: #10b981;
-            box-shadow: 0 0 15px rgba(16,185,129,0.4);
-        }
-        
-        .step-label {
-            position: absolute;
-            top: 100%;
-            margin-top: 8px;
-            font-size: 12px;
-            font-weight: 600;
-            color: #475569;
-            white-space: nowrap;
-        }
-        
-        .spacer { 
-            flex-grow: 1; 
-            min-width: 30px; 
-        }
-
-        /* Content area with ACTIONS */
-        .content-area {
-            margin-top: 25px;
-            padding: 25px;
-            background: #f8fafc;
-            border-radius: 12px;
-            border: 2px dashed #e2e8f0;
-            min-height: 350px;
-        }
-
-        .action-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .action-card {
-            background: white;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-            transition: all 0.3s ease;
-            border-left: 4px solid #10b981;
-            cursor: pointer;
-        }
-        
-        .action-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
-        }
-        
-        .action-card h4 {
-            color: #1e293b;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .action-card h4 i {
-            color: #10b981;
-        }
-        
-        .action-list {
-            list-style: none;
-            margin-bottom: 15px;
-        }
-        
-        .action-list li {
-            padding: 8px 0;
-            border-bottom: 1px solid #f1f5f9;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .action-list li:last-child {
-            border-bottom: none;
-        }
-        
-        .action-list li i {
-            color: #10b981;
-            font-size: 0.9em;
-        }
-        
+        /* Action Buttons */
         .action-buttons {
             display: flex;
-            gap: 10px;
-            margin-top: 15px;
+            gap: 15px;
+            margin-bottom: 25px;
             flex-wrap: wrap;
         }
 
-        /* Buttons */
         .btn {
-            padding: 10px 20px;
+            padding: 12px 20px;
             border: none;
             border-radius: 8px;
             text-decoration: none;
@@ -463,6 +315,7 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
         .btn-primary:hover {
             background: #2563eb;
             transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
         }
         
         .btn-success {
@@ -473,6 +326,7 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
         .btn-success:hover {
             background: #059669;
             transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
         }
         
         .btn-warning {
@@ -483,6 +337,7 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
         .btn-warning:hover {
             background: #d97706;
             transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);
         }
         
         .btn-danger {
@@ -493,6 +348,18 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
         .btn-danger:hover {
             background: #dc2626;
             transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+        }
+
+        .btn-info {
+            background: #06b6d4;
+            color: white;
+        }
+        
+        .btn-info:hover {
+            background: #0891b2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(8, 145, 178, 0.3);
         }
 
         /* Filter Section */
@@ -564,14 +431,56 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             font-size: 1.2rem;
         }
 
-        /* Simple Table Styling */
-        .simple-table {
-            width: 100%;
-            border-collapse: collapse;
+        /* DataTables Styling */
+        .dataTables_wrapper {
             margin-top: 15px;
         }
         
-        .simple-table th {
+        .dataTables_length,
+        .dataTables_filter {
+            margin-bottom: 15px;
+        }
+        
+        .dataTables_length select,
+        .dataTables_filter input {
+            padding: 8px 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        
+        .dataTables_info {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+        
+        .dataTables_paginate .paginate_button {
+            padding: 6px 12px;
+            margin: 0 2px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background: white;
+            color: #475569;
+        }
+        
+        .dataTables_paginate .paginate_button:hover {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+        }
+        
+        .dataTables_paginate .paginate_button.current {
+            background: #10b981;
+            color: white;
+            border-color: #10b981;
+        }
+
+        /* Table Styling */
+        table.dataTable {
+            border-collapse: collapse !important;
+            width: 100% !important;
+        }
+        
+        table.dataTable thead th {
             background: #f8fafc;
             padding: 12px 15px;
             text-align: left;
@@ -581,18 +490,14 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             font-size: 0.85rem;
         }
         
-        .simple-table td {
+        table.dataTable tbody td {
             padding: 12px 15px;
             border-bottom: 1px solid #f1f5f9;
             font-size: 0.85rem;
         }
         
-        .simple-table tr:hover {
+        table.dataTable tbody tr:hover {
             background: #f8fafc;
-        }
-        
-        .simple-table tr:last-child td {
-            border-bottom: none;
         }
 
         /* Badges */
@@ -607,6 +512,18 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
         .badge-danger { background: #fee2e2; color: #991b1b; }
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-warning { background: #fef3c7; color: #92400e; }
+
+        /* Action buttons in table */
+        .table-actions {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+        }
 
         /* PRINT FORM STYLING - WITH LOGO AND PATIENT HISTORY */
         .print-form-container {
@@ -795,17 +712,6 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             }
         }
 
-        /* Table responsive container */
-        .table-responsive {
-            width: 100%;
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-        
-        .table-responsive table {
-            min-width: 800px;
-        }
-
         /* MOBILE RESPONSIVE DESIGN */
         @media (max-width: 768px) {
             .topbar {
@@ -843,34 +749,13 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
                 font-size: 1.8em;
             }
             
-            .steps::before {
-                display: none;
+            .action-buttons {
+                flex-direction: column;
             }
             
-            .steps {
-                justify-content: space-around;
-            }
-            
-            .spacer {
-                display: none;
-            }
-            
-            .step {
-                width: 50px;
-                height: 50px;
-                font-size: 16px;
-            }
-            
-            .step-label {
-                font-size: 10px;
-            }
-            
-            .content-area {
-                padding: 20px 15px;
-            }
-            
-            .action-grid {
-                grid-template-columns: 1fr;
+            .btn {
+                width: 100%;
+                justify-content: center;
             }
             
             .filter-grid {
@@ -883,6 +768,10 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             
             .table-card {
                 padding: 15px;
+            }
+            
+            .table-actions {
+                flex-direction: column;
             }
         }
         
@@ -900,22 +789,8 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
                 width: 100%;
                 justify-content: center;
             }
-            
-            .action-buttons {
-                flex-direction: column;
-            }
-            
-            .btn {
-                width: 100%;
-                justify-content: center;
-            }
-            
-            .table-responsive {
-                font-size: 0.8rem;
-            }
         }
     </style>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
 
@@ -985,56 +860,24 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             </div>
         </div>
 
-        <!-- Clickable Process Steps -->
-        <div class="steps-container no-print">
-            <h2 class="steps-title">Patient Management Control Panel</h2>
-            
-            <div class="steps">
-                <div class="step active" onclick="showStep(1)">
-                    1
-                    <div class="step-label">Overview</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="showStep(2)">
-                    2
-                    <div class="step-label">Search & Filter</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="showStep(3)">
-                    3
-                    <div class="step-label">Reports</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="showStep(4)">
-                    4
-                    <div class="step-label">Export</div>
-                </div>
-            </div>
-
-            <!-- Dynamic Content Area -->
-            <div class="content-area" id="content">
-                <h2 style="color:#10b981; margin-bottom: 15px;">Welcome to Patient Management</h2>
-                <p>Click on the numbers above to manage different aspects of patient records.</p>
-                
-                <div class="action-grid">
-                    <div class="action-card" onclick="showStep(1)">
-                        <h4><i class="fas fa-chart-bar"></i> Patient Overview</h4>
-                        <ul class="action-list">
-                            <li><i class="fas fa-check"></i> View all patient records</li>
-                            <li><i class="fas fa-check"></i> Monitor registration trends</li>
-                            <li><i class="fas fa-check"></i> Track patient demographics</li>
-                        </ul>
-                    </div>
-                    <div class="action-card" onclick="showStep(2)">
-                        <h4><i class="fas fa-search"></i> Advanced Search</h4>
-                        <ul class="action-list">
-                            <li><i class="fas fa-check"></i> Search by name or card number</li>
-                            <li><i class="fas fa-check"></i> Filter by gender and date</li>
-                            <li><i class="fas fa-check"></i> Quick patient lookup</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
+        <!-- Action Buttons -->
+        <div class="action-buttons no-print">
+            <a href="dashboard.php" class="btn btn-primary">
+                <i class="fas fa-arrow-left"></i>
+                Back to Dashboard
+            </a>
+            <button type="button" onclick="printAllPatientForms()" class="btn btn-warning">
+                <i class="fas fa-print"></i>
+                Print All Patient Forms
+            </button>
+            <button type="button" onclick="exportToExcel()" class="btn btn-success">
+                <i class="fas fa-file-excel"></i>
+                Export to Excel
+            </button>
+            <!-- <button type="button" onclick="window.location.href='add_patient.php'" class="btn btn-info">
+                <i class="fas fa-plus"></i>
+                Add New Patient
+            </button> -->
         </div>
 
         <!-- Filter Section -->
@@ -1071,15 +914,11 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
                         <i class="fas fa-times"></i>
                         Clear Filters
                     </a>
-                    <button type="button" onclick="printAllPatientForms()" class="btn btn-warning">
-                        <i class="fas fa-print"></i>
-                        Print All Patient Forms
-                    </button>
                 </div>
             </form>
         </div>
 
-        <!-- Patients Table -->
+        <!-- Patients Table with DataTables -->
         <div class="table-card no-print">
             <h3>
                 <i class="fas fa-list"></i>
@@ -1090,7 +929,7 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             </h3>
 
             <div class="table-responsive">
-                <table class="simple-table">
+                <table id="patientsTable" class="display" style="width:100%">
                     <thead>
                         <tr>
                             <th>Card No</th>
@@ -1108,38 +947,38 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
                     <tbody>
                         <?php 
                         $patients_data = $patients;
-                        if (empty($patients_data)): 
+                        if (!empty($patients_data)): 
+                            foreach ($patients_data as $patient): 
                         ?>
                         <tr>
-                            <td colspan="10" style="text-align: center; padding: 20px; color: #64748b;">
-                                <i class="fas fa-info-circle" style="font-size: 2rem; margin-bottom: 10px; display: block;"></i>
-                                No patients found matching your criteria.
+                            <td><strong><?php echo htmlspecialchars($patient['card_no']); ?></strong></td>
+                            <td><?php echo htmlspecialchars($patient['full_name']); ?></td>
+                            <td><?php echo $patient['age'] ?: 'N/A'; ?></td>
+                            <td>
+                                <span class="badge <?php echo $patient['gender'] == 'male' ? 'badge-info' : 'badge-warning'; ?>">
+                                    <?php echo $patient['gender'] ? ucfirst($patient['gender']) : 'N/A'; ?>
+                                </span>
+                            </td>
+                            <td><?php echo $patient['weight'] ?: 'N/A'; ?></td>
+                            <td><?php echo $patient['phone'] ?: 'N/A'; ?></td>
+                            <td><?php echo $patient['address'] ? htmlspecialchars(substr($patient['address'], 0, 30)) . (strlen($patient['address']) > 30 ? '...' : '') : 'N/A'; ?></td>
+                            <td><?php echo $patient['created_by_name'] ?: 'System'; ?></td>
+                            <td><?php echo date('M j, Y', strtotime($patient['created_at'])); ?></td>
+                            <td>
+                                <div class="table-actions">
+                                    <button class="btn btn-warning btn-sm" onclick="printSingleForm('<?php echo $patient['card_no']; ?>')">
+                                        <i class="fas fa-print"></i> Print
+                                    </button>
+                                    <button class="btn btn-info btn-sm" onclick="viewPatientDetails(<?php echo $patient['id']; ?>)">
+                                        <i class="fas fa-eye"></i> View
+                                    </button>
+                                </div>
                             </td>
                         </tr>
-                        <?php else: ?>
-                            <?php foreach ($patients_data as $patient): ?>
-                            <tr>
-                                <td><strong><?php echo htmlspecialchars($patient['card_no']); ?></strong></td>
-                                <td><?php echo htmlspecialchars($patient['full_name']); ?></td>
-                                <td><?php echo $patient['age'] ?: 'N/A'; ?></td>
-                                <td>
-                                    <span class="badge <?php echo $patient['gender'] == 'male' ? 'badge-info' : 'badge-warning'; ?>">
-                                        <?php echo $patient['gender'] ? ucfirst($patient['gender']) : 'N/A'; ?>
-                                    </span>
-                                </td>
-                                <td><?php echo $patient['weight'] ?: 'N/A'; ?></td>
-                                <td><?php echo $patient['phone'] ?: 'N/A'; ?></td>
-                                <td><?php echo $patient['address'] ? htmlspecialchars(substr($patient['address'], 0, 30)) . (strlen($patient['address']) > 30 ? '...' : '') : 'N/A'; ?></td>
-                                <td><?php echo $patient['created_by_name'] ?: 'System'; ?></td>
-                                <td><?php echo date('M j, Y', strtotime($patient['created_at'])); ?></td>
-                                <td>
-                                    <button class="btn btn-warning btn-sm" onclick="printSingleForm('<?php echo $patient['card_no']; ?>')">
-                                        <i class="fas fa-print"></i> Print Form
-                                    </button>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
+                        <?php 
+                            endforeach; 
+                        endif; 
+                        ?>
                     </tbody>
                 </table>
             </div>
@@ -1288,203 +1127,58 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
 
     </div>
 
-    <script>
-        // Function to show step content with ACTIONS
-        function showStep(num) {
-            // Remove active class from all steps
-            document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-            // Add active to clicked step
-            event.target.classList.add('active');
+    <!-- DataTables Scripts -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
 
-            // Change content based on step
-            const content = document.getElementById('content');
-            
-            const stepsContent = {
-                1: `
-                    <h2 style="color:#10b981; margin-bottom: 15px;"><i class="fas fa-chart-bar"></i> Patient Overview</h2>
-                    <p>Get a comprehensive view of all patient records and statistics.</p>
-                    
-                    <div class="action-buttons" style="margin-bottom: 20px;">
-                        <button class="btn btn-primary" onclick="window.location.href='dashboard.php'">
-                            <i class="fas fa-tachometer-alt"></i> Back to Dashboard
-                        </button>
-                        <button class="btn btn-success" onclick="printAllPatientForms()">
-                            <i class="fas fa-print"></i> Print All Patient Forms
-                        </button>
-                    </div>
-                    
-                    <div class="action-grid">
-                        <div class="action-card" onclick="window.location.href='view_patients.php'">
-                            <h4><i class="fas fa-list"></i> View All Patients</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Complete patient database</li>
-                                <li><i class="fas fa-check"></i> Real-time statistics</li>
-                                <li><i class="fas fa-check"></i> Demographic analysis</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="action-card" onclick="showStep(2)">
-                            <h4><i class="fas fa-search"></i> Advanced Search</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Filter by multiple criteria</li>
-                                <li><i class="fas fa-check"></i> Quick patient lookup</li>
-                                <li><i class="fas fa-check"></i> Date range filtering</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="action-card" onclick="showStep(3)">
-                            <h4><i class="fas fa-chart-pie"></i> Analytics</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Gender distribution</li>
-                                <li><i class="fas fa-check"></i> Registration trends</li>
-                                <li><i class="fas fa-check"></i> Monthly reports</li>
-                            </ul>
-                        </div>
-                    </div>
-                `,
-                2: `
-                    <h2 style="color:#3b82f6; margin-bottom: 15px;"><i class="fas fa-search"></i> Search & Filter Patients</h2>
-                    <p>Use advanced search and filtering options to find specific patients.</p>
-                    
-                    <div class="action-grid">
-                        <div class="action-card">
-                            <h4><i class="fas fa-user-circle"></i> Search by Name</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Full name search</li>
-                                <li><i class="fas fa-check"></i> Partial name matching</li>
-                                <li><i class="fas fa-check"></i> Case-insensitive</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="action-card">
-                            <h4><i class="fas fa-id-card"></i> Search by Card Number</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Exact card number</li>
-                                <li><i class="fas fa-check"></i> Quick patient identification</li>
-                                <li><i class="fas fa-check"></i> Unique identifier search</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="action-card">
-                            <h4><i class="fas fa-filter"></i> Advanced Filtering</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Gender-based filter</li>
-                                <li><i class="fas fa-check"></i> Date range selection</li>
-                                <li><i class="fas fa-check"></i> Combined criteria</li>
-                            </ul>
-                        </div>
-                    </div>
-                `,
-                3: `
-                    <h2 style="color:#f59e0b; margin-bottom: 15px;"><i class="fas fa-chart-pie"></i> Reports & Analytics</h2>
-                    <p>Generate comprehensive reports and analyze patient data.</p>
-                    
-                    <div class="action-grid">
-                        <div class="action-card" onclick="printAllPatientForms()">
-                            <h4><i class="fas fa-print"></i> Print Patient Forms</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Individual patient forms</li>
-                                <li><i class="fas fa-check"></i> Medical record format</li>
-                                <li><i class="fas fa-check"></i> Professional design</li>
-                            </ul>
-                            <div class="action-buttons">
-                                <button class="btn btn-warning" onclick="printAllPatientForms()">
-                                    <i class="fas fa-print"></i> Print All Forms
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div class="action-card">
-                            <h4><i class="fas fa-chart-line"></i> Statistical Reports</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Gender distribution</li>
-                                <li><i class="fas fa-check"></i> Monthly registrations</li>
-                                <li><i class="fas fa-check"></i> Age group analysis</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="action-card">
-                            <h4><i class="fas fa-calendar-alt"></i> Time-based Reports</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Daily registrations</li>
-                                <li><i class="fas fa-check"></i> Weekly summaries</li>
-                                <li><i class="fas fa-check"></i> Monthly trends</li>
-                            </ul>
-                        </div>
-                    </div>
-                `,
-                4: `
-                    <h2 style="color:#8b5cf6; margin-bottom: 15px;"><i class="fas fa-download"></i> Data Export</h2>
-                    <p>Export patient data in various formats for external use.</p>
-                    
-                    <div class="action-grid">
-                        <div class="action-card">
-                            <h4><i class="fas fa-file-excel"></i> Excel Export</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Spreadsheet format</li>
-                                <li><i class="fas fa-check"></i> Data analysis ready</li>
-                                <li><i class="fas fa-check"></i> Preserves formatting</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="action-card">
-                            <h4><i class="fas fa-file-pdf"></i> PDF Export</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Professional documents</li>
-                                <li><i class="fas fa-check"></i> Print-ready format</li>
-                                <li><i class="fas fa-check"></i> Secure sharing</li>
-                            </ul>
-                        </div>
-                        
-                        <div class="action-card">
-                            <h4><i class="fas fa-copy"></i> Copy Data</h4>
-                            <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Quick copy to clipboard</li>
-                                <li><i class="fas fa-check"></i> Paste into other apps</li>
-                                <li><i class="fas fa-check"></i> Instant data transfer</li>
-                            </ul>
-                        </div>
-                    </div>
-                `
-            };
-            
-            content.innerHTML = stepsContent[num] || stepsContent[1];
-        }
+    <script>
+        // Initialize DataTable
+        $(document).ready(function() {
+            $('#patientsTable').DataTable({
+                "pageLength": 25,
+                "responsive": true,
+                "language": {
+                    "search": "Search:",
+                    "lengthMenu": "Show _MENU_ entries",
+                    "info": "Showing _START_ to _END_ of _TOTAL_ patients",
+                    "infoEmpty": "Showing 0 to 0 of 0 patients",
+                    "paginate": {
+                        "previous": "Previous",
+                        "next": "Next"
+                    }
+                },
+                "order": [[8, 'desc']] // Sort by registration date descending
+            });
+        });
 
         // Function to print all patient forms
         function printAllPatientForms() {
             const printForms = document.getElementById('printForms');
             printForms.style.display = 'block';
             
-            // Hide all forms first, then show them one by one for printing
             const allForms = document.querySelectorAll('.print-form');
             allForms.forEach(form => {
                 form.style.display = 'none';
             });
             
-            // Print each form on a separate page
             let currentIndex = 0;
             
             function printNextForm() {
                 if (currentIndex < allForms.length) {
-                    // Hide all forms
                     allForms.forEach(form => {
                         form.style.display = 'none';
                     });
                     
-                    // Show current form
                     allForms[currentIndex].style.display = 'block';
                     
-                    // Print current form
                     window.print();
                     
                     currentIndex++;
                     
-                    // Wait a bit before printing next form
                     if (currentIndex < allForms.length) {
                         setTimeout(printNextForm, 500);
                     } else {
-                        // Reset after all forms are printed
                         setTimeout(() => {
                             allForms.forEach(form => {
                                 form.style.display = 'block';
@@ -1495,7 +1189,6 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
                 }
             }
             
-            // Start printing
             printNextForm();
         }
 
@@ -1504,21 +1197,17 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
             const printForms = document.getElementById('printForms');
             const allForms = document.querySelectorAll('.print-form');
             
-            // Hide all forms
             allForms.forEach(form => {
                 form.style.display = 'none';
             });
             
-            // Show only the selected form
             const singleForm = document.getElementById('form-' + cardNo);
             if (singleForm) {
                 singleForm.style.display = 'block';
                 printForms.style.display = 'block';
                 
-                // Print the form
                 window.print();
                 
-                // Reset after printing
                 setTimeout(() => {
                     allForms.forEach(form => {
                         form.style.display = 'block';
@@ -1526,6 +1215,20 @@ function getPatientTreatmentHistory($pdo, $patient_id) {
                     printForms.style.display = 'none';
                 }, 500);
             }
+        }
+
+        // Function to view patient details
+        function viewPatientDetails(patientId) {
+            window.location.href = 'patient_details.php?id=' + patientId;
+        }
+
+        // Function to export to Excel
+        function exportToExcel() {
+            // Simple table export (you can enhance this with a proper Excel export library)
+            const table = document.getElementById('patientsTable');
+            const html = table.outerHTML;
+            const url = 'data:application/vnd.ms-excel,' + escape(html);
+            window.open(url, '_blank');
         }
 
         // Update time every minute

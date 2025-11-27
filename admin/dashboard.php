@@ -773,7 +773,7 @@ $current_time = date('h:i A');
                         <h4><i class="fas fa-cogs"></i> System Settings</h4>
                         <ul class="action-list">
                             <li><i class="fas fa-check"></i> System configuration</li>
-                            <li><i class="fas fa-check"></i> Backup management</li>
+                            <li><i class="fas fa-check"></i> Print receipts</li>
                             <li><i class="fas fa-check"></i> Security settings</li>
                         </ul>
                     </div>
@@ -1001,7 +1001,7 @@ $current_time = date('h:i A');
                             <ul class="action-list">
                                 <li><i class="fas fa-check"></i> Export to Excel</li>
                                 <li><i class="fas fa-check"></i> PDF reports</li>
-                                <li><i class="fas fa-check"></i> Backup data</li>
+                                <li><i class="fas fa-check"></i> Print receipts</li>
                             </ul>
                             <div class="action-buttons">
                                 <button class="btn btn-warning" onclick="window.location.href='patient_export.php'">
@@ -1013,7 +1013,7 @@ $current_time = date('h:i A');
                 `,
                 3: `
                     <h2 style="color:#ef4444; margin-bottom: 15px;"><i class="fas fa-cogs"></i> System Administration</h2>
-                    <p>Configure system settings, backups and maintenance.</p>
+                    <p>Configure system settings and print receipts.</p>
                     
                     <div class="action-grid">
                         <div class="action-card" onclick="window.location.href='system_settings.php'">
@@ -1030,16 +1030,16 @@ $current_time = date('h:i A');
                             </div>
                         </div>
                         
-                        <div class="action-card" onclick="window.location.href='backup_management.php'">
-                            <h4><i class="fas fa-database"></i> Backup & Restore</h4>
+                        <div class="action-card" onclick="window.location.href='print_receipts.php'">
+                            <h4><i class="fas fa-receipt"></i> Print Receipts</h4>
                             <ul class="action-list">
-                                <li><i class="fas fa-check"></i> Database backups</li>
-                                <li><i class="fas fa-check"></i> System restore points</li>
-                                <li><i class="fas fa-check"></i> Data export/import</li>
+                                <li><i class="fas fa-check"></i> Patient receipts</li>
+                                <li><i class="fas fa-check"></i> Payment receipts</li>
+                                <li><i class="fas fa-check"></i> Medical reports</li>
                             </ul>
                             <div class="action-buttons">
-                                <button class="btn btn-success" onclick="window.location.href='backup_management.php'">
-                                    <i class="fas fa-save"></i> Backup System
+                                <button class="btn btn-success" onclick="window.location.href='print_receipts.php'">
+                                    <i class="fas fa-print"></i> Print Receipts
                                 </button>
                             </div>
                         </div>

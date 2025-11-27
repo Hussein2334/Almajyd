@@ -256,7 +256,7 @@ $total_patients = count($patients);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Export Patients - Almajyd Dispensary</title>
+    <title>Patient Data Table - Almajyd Dispensary</title>
     <style>
         * { 
             margin: 0; 
@@ -412,163 +412,6 @@ $total_patients = count($patients);
             flex-wrap: wrap;
         }
 
-        /* PERSISTENT NAVIGATION STEPS */
-        .steps-container {
-            background: white;
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            margin-bottom: 30px;
-        }
-        
-        .steps-title {
-            text-align: center;
-            margin-bottom: 25px;
-            color: #1e293b;
-            font-size: 1.4rem;
-        }
-        
-        .steps {
-            display: flex;
-            align-items: center;
-            margin: 30px 0;
-            position: relative;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        
-        .steps::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50px;
-            right: 50px;
-            height: 3px;
-            background: #e2e8f0;
-            border-radius: 3px;
-            z-index: 1;
-        }
-        
-        .step {
-            width: 60px;
-            height: 60px;
-            background: white;
-            border: 3px solid #e2e8f0;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 20px;
-            color: #64748b;
-            z-index: 2;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-        }
-        
-        .step:hover {
-            transform: scale(1.1);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.15);
-        }
-        
-        .step.active {
-            border-color: #10b981;
-            color: white;
-            background: #10b981;
-            box-shadow: 0 0 15px rgba(16,185,129,0.4);
-        }
-        
-        .step-label {
-            position: absolute;
-            top: 100%;
-            margin-top: 8px;
-            font-size: 12px;
-            font-weight: 600;
-            color: #475569;
-            white-space: nowrap;
-        }
-        
-        .spacer { 
-            flex-grow: 1; 
-            min-width: 30px; 
-        }
-
-        /* Content area with ACTIONS */
-        .content-area {
-            margin-top: 25px;
-            padding: 25px;
-            background: #f8fafc;
-            border-radius: 12px;
-            border: 2px dashed #e2e8f0;
-            min-height: 350px;
-        }
-
-        .action-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .action-card {
-            background: white;
-            padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-            transition: all 0.3s ease;
-            border-left: 4px solid #10b981;
-            cursor: pointer;
-        }
-        
-        .action-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
-        }
-        
-        .action-card h4 {
-            color: #1e293b;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .action-card h4 i {
-            color: #10b981;
-        }
-        
-        .action-list {
-            list-style: none;
-            margin-bottom: 15px;
-        }
-        
-        .action-list li {
-            padding: 8px 0;
-            border-bottom: 1px solid #f1f5f9;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .action-list li:last-child {
-            border-bottom: none;
-        }
-        
-        .action-list li i {
-            color: #10b981;
-            font-size: 0.9em;
-        }
-        
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-            flex-wrap: wrap;
-        }
-
         /* Export Options */
         .export-options {
             background: white;
@@ -634,6 +477,16 @@ $total_patients = count($patients);
         
         .btn-warning:hover {
             background: #d97706;
+            transform: translateY(-2px);
+        }
+
+        .btn-info {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-info:hover {
+            background: #2563eb;
             transform: translateY(-2px);
         }
 
@@ -706,35 +559,56 @@ $total_patients = count($patients);
             font-size: 1.2rem;
         }
 
-        /* Simple Table Styling */
-        .simple-table {
+        /* Table Actions */
+        .table-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .table-info {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+
+        /* Data Table Styling */
+        .data-table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 15px;
+            font-size: 0.85rem;
         }
         
-        .simple-table th {
-            background: #f8fafc;
+        .data-table th {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
             padding: 12px 15px;
             text-align: left;
             font-weight: 600;
-            color: #374151;
-            border-bottom: 2px solid #e5e7eb;
-            font-size: 0.85rem;
+            border: none;
+            position: sticky;
+            top: 0;
         }
         
-        .simple-table td {
+        .data-table td {
             padding: 12px 15px;
             border-bottom: 1px solid #f1f5f9;
-            font-size: 0.85rem;
+            background: white;
         }
         
-        .simple-table tr:hover {
+        .data-table tr:hover {
             background: #f8fafc;
         }
         
-        .simple-table tr:last-child td {
-            border-bottom: none;
+        .data-table tr:nth-child(even) {
+            background: #fafdfb;
+        }
+        
+        .data-table tr:nth-child(even):hover {
+            background: #f1faf7;
         }
 
         /* Badges */
@@ -743,22 +617,39 @@ $total_patients = count($patients);
             border-radius: 12px;
             font-size: 0.7rem;
             font-weight: 600;
+            display: inline-block;
         }
         
         .badge-success { background: #d1fae5; color: #065f46; }
         .badge-danger { background: #fee2e2; color: #991b1b; }
         .badge-info { background: #dbeafe; color: #1e40af; }
         .badge-warning { background: #fef3c7; color: #92400e; }
+        .badge-primary { background: #e0e7ff; color: #3730a3; }
 
         /* Table responsive container */
         .table-responsive {
             width: 100%;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
         }
         
         .table-responsive table {
-            min-width: 800px;
+            min-width: 1000px;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #64748b;
+        }
+        
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            color: #cbd5e1;
         }
 
         /* MOBILE RESPONSIVE DESIGN */
@@ -795,28 +686,6 @@ $total_patients = count($patients);
                 justify-content: center;
             }
             
-            .steps::before {
-                display: none;
-            }
-            
-            .steps {
-                justify-content: space-around;
-            }
-            
-            .spacer {
-                display: none;
-            }
-            
-            .step {
-                width: 50px;
-                height: 50px;
-                font-size: 16px;
-            }
-            
-            .step-label {
-                font-size: 10px;
-            }
-            
             .export-buttons {
                 flex-direction: column;
                 align-items: center;
@@ -838,6 +707,11 @@ $total_patients = count($patients);
             
             .table-card {
                 padding: 15px;
+            }
+            
+            .table-actions {
+                flex-direction: column;
+                align-items: flex-start;
             }
         }
         
@@ -896,10 +770,10 @@ $total_patients = count($patients);
         <div class="page-header">
             <div>
                 <h1 class="page-title">
-                    <i class="fas fa-download"></i>
-                    Export Patient Data
+                    <i class="fas fa-table"></i>
+                    Patient Data Table
                 </h1>
-                <p style="color: #64748b; margin-top: 5px;">Export patient records to Excel or PDF format</p>
+                <p style="color: #64748b; margin-top: 5px;">View and export complete patient records</p>
             </div>
             <div class="page-actions">
                 <a href="view_patients.php" class="btn btn-warning">
@@ -909,86 +783,9 @@ $total_patients = count($patients);
             </div>
         </div>
 
-        <!-- PERSISTENT NAVIGATION STEPS -->
-        <div class="steps-container">
-            <h2 class="steps-title">Data Export Control Panel</h2>
-            
-            <div class="steps">
-                <div class="step" onclick="window.location.href='view_patients.php'">
-                    1
-                    <div class="step-label">View Patients</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="window.location.href='patient_reports.php'">
-                    2
-                    <div class="step-label">Reports</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step active">
-                    3
-                    <div class="step-label">Export Data</div>
-                </div>
-                <div class="spacer"></div>
-                <div class="step" onclick="window.location.href='dashboard.php'">
-                    4
-                    <div class="step-label">Dashboard</div>
-                </div>
-            </div>
-
-            <!-- Dynamic Content Area -->
-            <div class="content-area" id="content">
-                <h2 style="color:#10b981; margin-bottom: 15px;"><i class="fas fa-download"></i> Data Export Center</h2>
-                <p>Export patient data in various formats for external use, reporting, and analysis.</p>
-                
-                <div class="action-grid">
-                    <div class="action-card" onclick="document.querySelector('.btn-excel').click()">
-                        <h4><i class="fas fa-file-excel"></i> Excel Export</h4>
-                        <ul class="action-list">
-                            <li><i class="fas fa-check"></i> Spreadsheet format</li>
-                            <li><i class="fas fa-check"></i> Data analysis ready</li>
-                            <li><i class="fas fa-check"></i> Preserves formatting</li>
-                        </ul>
-                        <div class="action-buttons">
-                            <a href="?export=excel<?php echo buildExportQueryString($search, $gender_filter, $date_from, $date_to); ?>" class="btn btn-excel">
-                                <i class="fas fa-download"></i> Download Excel
-                            </a>
-                        </div>
-                    </div>
-                    
-                    <div class="action-card" onclick="document.querySelector('.btn-pdf').click()">
-                        <h4><i class="fas fa-file-pdf"></i> PDF Export</h4>
-                        <ul class="action-list">
-                            <li><i class="fas fa-check"></i> Professional documents</li>
-                            <li><i class="fas fa-check"></i> Print-ready format</li>
-                            <li><i class="fas fa-check"></i> Secure sharing</li>
-                        </ul>
-                        <div class="action-buttons">
-                            <a href="?export=pdf<?php echo buildExportQueryString($search, $gender_filter, $date_from, $date_to); ?>" class="btn btn-pdf">
-                                <i class="fas fa-download"></i> Download PDF
-                            </a>
-                        </div>
-                    </div>
-                    
-                    <div class="action-card">
-                        <h4><i class="fas fa-filter"></i> Filter Data</h4>
-                        <ul class="action-list">
-                            <li><i class="fas fa-check"></i> Apply search filters</li>
-                            <li><i class="fas fa-check"></i> Select date ranges</li>
-                            <li><i class="fas fa-check"></i> Gender-based filtering</li>
-                        </ul>
-                        <div class="action-buttons">
-                            <button class="btn btn-warning" onclick="document.querySelector('.filter-section').scrollIntoView({behavior: 'smooth'})">
-                                <i class="fas fa-filter"></i> Apply Filters
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Export Options -->
         <div class="export-options">
-            <h2 class="export-title">Quick Export</h2>
+            <h2 class="export-title">Export Patient Data</h2>
             <div class="export-buttons">
                 <a href="?export=excel<?php echo buildExportQueryString($search, $gender_filter, $date_from, $date_to); ?>" class="btn btn-excel">
                     <i class="fas fa-file-excel"></i>
@@ -1000,7 +797,8 @@ $total_patients = count($patients);
                 </a>
             </div>
             <p style="margin-top: 15px; color: #64748b; font-size: 0.9rem;">
-                Total patients to export: <strong><?php echo $total_patients; ?></strong>
+                Total patients: <strong><?php echo $total_patients; ?></strong> | 
+                Filtered results will be exported
             </p>
         </div>
 
@@ -1042,18 +840,25 @@ $total_patients = count($patients);
             </form>
         </div>
 
-        <!-- Patients Table Preview -->
+        <!-- Patients Data Table -->
         <div class="table-card">
-            <h3>
-                <i class="fas fa-list"></i>
-                Patient Data Preview
-                <small style="font-size: 0.9rem; color: #64748b; font-weight: normal;">
-                    (Total: <?php echo $total_patients; ?> patients)
-                </small>
-            </h3>
+            <div class="table-actions">
+                <h3 style="margin: 0;">
+                    <i class="fas fa-users"></i>
+                    Patient Records
+                </h3>
+                <div class="table-info">
+                    Showing: <strong><?php echo $total_patients; ?></strong> patients
+                    <?php if ($search || $gender_filter || $date_from || $date_to): ?>
+                        <span class="badge badge-primary" style="margin-left: 10px;">
+                            <i class="fas fa-filter"></i> Filtered
+                        </span>
+                    <?php endif; ?>
+                </div>
+            </div>
 
             <div class="table-responsive">
-                <table class="simple-table">
+                <table class="data-table">
                     <thead>
                         <tr>
                             <th>Card No</th>
@@ -1068,32 +873,84 @@ $total_patients = count($patients);
                         </tr>
                     </thead>
                     <tbody>
-                        <?php 
-                        $patients_data = $patients;
-                        if (empty($patients_data)): 
-                        ?>
+                        <?php if (empty($patients)): ?>
                         <tr>
-                            <td colspan="9" style="text-align: center; padding: 20px; color: #64748b;">
-                                <i class="fas fa-info-circle" style="font-size: 2rem; margin-bottom: 10px; display: block;"></i>
-                                No patients found matching your criteria.
+                            <td colspan="9">
+                                <div class="empty-state">
+                                    <i class="fas fa-inbox"></i>
+                                    <h4>No patients found</h4>
+                                    <p>No patient records match your current filters.</p>
+                                </div>
                             </td>
                         </tr>
                         <?php else: ?>
-                            <?php foreach ($patients_data as $patient): ?>
+                            <?php foreach ($patients as $patient): ?>
                             <tr>
-                                <td><strong><?php echo htmlspecialchars($patient['card_no']); ?></strong></td>
-                                <td><?php echo htmlspecialchars($patient['full_name']); ?></td>
-                                <td><?php echo $patient['age'] ?: 'N/A'; ?></td>
                                 <td>
-                                    <span class="badge <?php echo $patient['gender'] == 'male' ? 'badge-info' : 'badge-warning'; ?>">
-                                        <?php echo $patient['gender'] ? ucfirst($patient['gender']) : 'N/A'; ?>
-                                    </span>
+                                    <strong><?php echo htmlspecialchars($patient['card_no']); ?></strong>
                                 </td>
-                                <td><?php echo $patient['weight'] ?: 'N/A'; ?></td>
-                                <td><?php echo $patient['phone'] ?: 'N/A'; ?></td>
-                                <td><?php echo $patient['address'] ? htmlspecialchars(substr($patient['address'], 0, 30)) . (strlen($patient['address']) > 30 ? '...' : '') : 'N/A'; ?></td>
-                                <td><?php echo $patient['created_by_name'] ?: 'System'; ?></td>
-                                <td><?php echo date('M j, Y', strtotime($patient['created_at'])); ?></td>
+                                <td>
+                                    <div style="font-weight: 600;"><?php echo htmlspecialchars($patient['full_name']); ?></div>
+                                </td>
+                                <td>
+                                    <?php if ($patient['age']): ?>
+                                        <span class="badge badge-info"><?php echo $patient['age']; ?> years</span>
+                                    <?php else: ?>
+                                        <span style="color: #94a3b8;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($patient['gender']): ?>
+                                        <span class="badge <?php echo $patient['gender'] == 'male' ? 'badge-primary' : 'badge-warning'; ?>">
+                                            <i class="fas fa-<?php echo $patient['gender'] == 'male' ? 'male' : 'female'; ?>"></i>
+                                            <?php echo ucfirst($patient['gender']); ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span style="color: #94a3b8;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($patient['weight']): ?>
+                                        <span class="badge badge-success"><?php echo $patient['weight']; ?> kg</span>
+                                    <?php else: ?>
+                                        <span style="color: #94a3b8;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($patient['phone']): ?>
+                                        <a href="tel:<?php echo htmlspecialchars($patient['phone']); ?>" style="color: #10b981; text-decoration: none;">
+                                            <i class="fas fa-phone"></i>
+                                            <?php echo htmlspecialchars($patient['phone']); ?>
+                                        </a>
+                                    <?php else: ?>
+                                        <span style="color: #94a3b8;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($patient['address']): ?>
+                                        <span title="<?php echo htmlspecialchars($patient['address']); ?>">
+                                            <?php 
+                                            $address = $patient['address'];
+                                            echo htmlspecialchars(strlen($address) > 30 ? substr($address, 0, 30) . '...' : $address); 
+                                            ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span style="color: #94a3b8;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($patient['created_by_name']): ?>
+                                        <span class="badge badge-info"><?php echo $patient['created_by_name']; ?></span>
+                                    <?php else: ?>
+                                        <span style="color: #94a3b8;">System</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <small style="color: #64748b;">
+                                        <i class="fas fa-calendar"></i>
+                                        <?php echo date('M j, Y', strtotime($patient['created_at'])); ?>
+                                    </small>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -1118,6 +975,22 @@ $total_patients = count($patients);
 
         updateTime();
         setInterval(updateTime, 60000);
+
+        // Add some interactive features
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add click effect to table rows
+            const tableRows = document.querySelectorAll('.data-table tbody tr');
+            tableRows.forEach(row => {
+                row.addEventListener('click', function() {
+                    this.style.transform = 'scale(1.01)';
+                    this.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                    setTimeout(() => {
+                        this.style.transform = '';
+                        this.style.boxShadow = '';
+                    }, 200);
+                });
+            });
+        });
     </script>
 </body>
 </html>
