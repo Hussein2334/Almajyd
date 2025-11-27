@@ -16,7 +16,7 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'receptionist') {
 $success_message = '';
 $error_message = '';
 
-// Handle Add Patient - FIXED VERSION (without created_by column)
+// Handle Add Patient
 if (isset($_POST['add_patient'])) {
     $card_no = $_POST['card_no'];
     $full_name = $_POST['full_name'];
@@ -36,15 +36,8 @@ if (isset($_POST['add_patient'])) {
         if ($check_stmt->fetch()) {
             $error_message = "Patient with this card number already exists!";
         } else {
-            // FIXED: Remove created_by from INSERT statement
-            $stmt = $pdo->prepare("INSERT INTO patients (card_no, full_name, age, gender, weight, phone, address, patient_type, consultation_fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$card_no, $full_name, $age, $gender, $weight, $phone, $address, $patient_type, $consultation_fee]);
-            
-            // Create payment record for consultation fee WITHOUT checking_form_id
-            if ($consultation_fee > 0) {
-                $payment_stmt = $pdo->prepare("INSERT INTO payments (patient_id, amount, payment_type, status) VALUES (?, ?, 'consultation', 'pending')");
-                $payment_stmt->execute([$pdo->lastInsertId(), $consultation_fee]);
-            }
+            $stmt = $pdo->prepare("INSERT INTO patients (card_no, full_name, age, gender, weight, phone, address, patient_type, consultation_fee, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$card_no, $full_name, $age, $gender, $weight, $phone, $address, $patient_type, $consultation_fee, $_SESSION['user_id']]);
             
             $success_message = "Patient added successfully!" . ($consultation_fee > 0 ? " Consultation fee: TSh " . number_format($consultation_fee, 2) : "");
         }
@@ -53,7 +46,7 @@ if (isset($_POST['add_patient'])) {
     }
 }
 
-// Handle Update Patient - FIXED VERSION
+// Handle Update Patient
 if (isset($_POST['update_patient'])) {
     $patient_id = $_POST['patient_id'];
     $full_name = $_POST['full_name'];
@@ -69,46 +62,48 @@ if (isset($_POST['update_patient'])) {
         $stmt = $pdo->prepare("UPDATE patients SET full_name = ?, age = ?, gender = ?, weight = ?, phone = ?, address = ?, patient_type = ?, consultation_fee = ? WHERE id = ?");
         $stmt->execute([$full_name, $age, $gender, $weight, $phone, $address, $patient_type, $consultation_fee, $patient_id]);
         
-        // Update payment record if consultation fee exists - FIXED: Don't include checking_form_id
-        if ($consultation_fee > 0) {
-            $check_payment_stmt = $pdo->prepare("SELECT id FROM payments WHERE patient_id = ? AND payment_type = 'consultation'");
-            $check_payment_stmt->execute([$patient_id]);
-            $existing_payment = $check_payment_stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if ($existing_payment) {
-                $update_payment_stmt = $pdo->prepare("UPDATE payments SET amount = ? WHERE id = ? AND patient_id = ?");
-                $update_payment_stmt->execute([$consultation_fee, $existing_payment['id'], $patient_id]);
-            } else {
-                $payment_stmt = $pdo->prepare("INSERT INTO payments (patient_id, amount, payment_type, status) VALUES (?, ?, 'consultation', 'pending')");
-                $payment_stmt->execute([$patient_id, $consultation_fee]);
-            }
-        }
-        
         $success_message = "Patient information updated successfully!" . ($consultation_fee > 0 ? " Consultation fee updated to: TSh " . number_format($consultation_fee, 2) : "");
     } catch (PDOException $e) {
         $error_message = "Error updating patient: " . $e->getMessage();
     }
 }
 
-// Handle Delete Patient - FIXED VERSION
+// Handle Delete Patient
 if (isset($_POST['delete_patient'])) {
     $patient_id = $_POST['patient_id'];
     
     try {
-        // First, set checking_form_id to NULL for payments to avoid foreign key constraint
-        $nullify_payments_stmt = $pdo->prepare("UPDATE payments SET checking_form_id = NULL WHERE patient_id = ?");
-        $nullify_payments_stmt->execute([$patient_id]);
+        // Start transaction
+        $pdo->beginTransaction();
         
-        // Then delete payments
+        // 1. First check if patient exists
+        $check_patient_stmt = $pdo->prepare("SELECT id, card_no, full_name FROM patients WHERE id = ?");
+        $check_patient_stmt->execute([$patient_id]);
+        $patient = $check_patient_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$patient) {
+            throw new Exception("Patient not found!");
+        }
+        
+        // 2. Delete related records
+        $delete_checking_forms_stmt = $pdo->prepare("DELETE FROM checking_forms WHERE patient_id = ?");
+        $delete_checking_forms_stmt->execute([$patient_id]);
+        
         $delete_payments_stmt = $pdo->prepare("DELETE FROM payments WHERE patient_id = ?");
         $delete_payments_stmt->execute([$patient_id]);
         
-        // Then delete patient
-        $stmt = $pdo->prepare("DELETE FROM patients WHERE id = ?");
-        $stmt->execute([$patient_id]);
+        // 3. Finally delete the patient
+        $delete_patient_stmt = $pdo->prepare("DELETE FROM patients WHERE id = ?");
+        $delete_patient_stmt->execute([$patient_id]);
         
-        $success_message = "Patient deleted successfully!";
-    } catch (PDOException $e) {
+        // Commit transaction
+        $pdo->commit();
+        
+        $success_message = "Patient '{$patient['full_name']}' (Card: {$patient['card_no']}) deleted successfully!";
+        
+    } catch (Exception $e) {
+        // Rollback transaction on error
+        $pdo->rollBack();
         $error_message = "Error deleting patient: " . $e->getMessage();
     }
 }
@@ -122,10 +117,6 @@ if (isset($_POST['update_fee_settings'])) {
     $follow_up_fee = $_POST['follow_up_fee'];
     
     try {
-        // Store fee settings in a settings table or update existing
-        $check_settings_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM settings WHERE setting_key LIKE 'consultation_fee_%'");
-        $check_settings_stmt->execute();
-        
         $settings = [
             'consultation_fee_standard' => $standard_fee,
             'consultation_fee_child' => $child_fee,
@@ -135,14 +126,14 @@ if (isset($_POST['update_fee_settings'])) {
         ];
         
         foreach ($settings as $key => $value) {
-            $check_stmt = $pdo->prepare("SELECT id FROM settings WHERE setting_key = ?");
+            $check_stmt = $pdo->prepare("SELECT id FROM system_settings WHERE setting_key = ?");
             $check_stmt->execute([$key]);
             
             if ($check_stmt->fetch()) {
-                $update_stmt = $pdo->prepare("UPDATE settings SET setting_value = ? WHERE setting_key = ?");
+                $update_stmt = $pdo->prepare("UPDATE system_settings SET setting_value = ? WHERE setting_key = ?");
                 $update_stmt->execute([$value, $key]);
             } else {
-                $insert_stmt = $pdo->prepare("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)");
+                $insert_stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES (?, ?)");
                 $insert_stmt->execute([$key, $value]);
             }
         }
@@ -213,12 +204,12 @@ $total_count_stmt = $pdo->query("SELECT COUNT(*) as count FROM patients");
 $total_count = $total_count_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
 // Get total consultation fees pending
-$pending_fees_stmt = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE payment_type = 'consultation' AND status = 'pending'");
+$pending_fees_stmt = $pdo->query("SELECT COALESCE(SUM(consultation_fee), 0) as total FROM patients WHERE consultation_fee > 0");
 $pending_fees = $pending_fees_stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Get consultation fee settings
 $fee_settings = [];
-$settings_stmt = $pdo->query("SELECT setting_key, setting_value FROM settings WHERE setting_key LIKE 'consultation_fee_%'");
+$settings_stmt = $pdo->query("SELECT setting_key, setting_value FROM system_settings WHERE setting_key LIKE 'consultation_fee_%'");
 $settings_data = $settings_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 foreach ($settings_data as $setting) {
@@ -824,53 +815,6 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             color: #059669;
         }
 
-        /* DataTables Customization */
-        .dataTables_wrapper {
-            margin-top: 15px;
-        }
-        
-        .dataTables_length,
-        .dataTables_filter {
-            margin-bottom: 15px;
-        }
-        
-        .dataTables_length select,
-        .dataTables_filter input {
-            padding: 8px 12px;
-            border: 2px solid #e2e8f0;
-            border-radius: 6px;
-            font-size: 0.85rem;
-        }
-        
-        .dataTables_info {
-            padding: 15px 0;
-            color: #64748b;
-            font-size: 0.85rem;
-        }
-        
-        .dataTables_paginate .paginate_button {
-            padding: 8px 12px;
-            margin: 0 2px;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            background: white;
-            color: #374151;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .dataTables_paginate .paginate_button:hover {
-            background: #10b981;
-            color: white;
-            border-color: #10b981;
-        }
-        
-        .dataTables_paginate .paginate_button.current {
-            background: #10b981;
-            color: white;
-            border-color: #10b981;
-        }
-
         /* Delete Confirmation Modal */
         .modal {
             display: none;
@@ -1003,7 +947,6 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
         }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css">
      <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
@@ -1283,7 +1226,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                 </h3>
 
                 <div class="table-responsive">
-                    <table class="simple-table" id="patientsTable">
+                    <table class="simple-table">
                         <thead>
                             <tr>
                                 <th>Card No</th>
@@ -1318,12 +1261,12 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                                     </td>
                                     <td>
                                         <span class="badge <?php 
-                                            echo $patient['patient_type'] == 'standard' ? 'badge-success' : 
-                                                 ($patient['patient_type'] == 'child' ? 'badge-info' : 
-                                                 ($patient['patient_type'] == 'senior' ? 'badge-warning' : 
-                                                 ($patient['patient_type'] == 'emergency' ? 'badge-danger' : 'badge-purple'))); 
+                                            echo ($patient['patient_type'] ?? 'standard') == 'standard' ? 'badge-success' : 
+                                                 (($patient['patient_type'] ?? 'standard') == 'child' ? 'badge-info' : 
+                                                 (($patient['patient_type'] ?? 'standard') == 'senior' ? 'badge-warning' : 
+                                                 (($patient['patient_type'] ?? 'standard') == 'emergency' ? 'badge-danger' : 'badge-purple'))); 
                                         ?>">
-                                            <?php echo $patient['patient_type'] ? ucfirst(str_replace('_', ' ', $patient['patient_type'])) : 'Standard'; ?>
+                                            <?php echo isset($patient['patient_type']) ? ucfirst(str_replace('_', ' ', $patient['patient_type'])) : 'Standard'; ?>
                                         </span>
                                     </td>
                                     <td>
@@ -1519,10 +1462,6 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
         </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
-    
     <script>
         // Consultation fee rates
         const feeRates = {
@@ -1532,30 +1471,6 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             'emergency': <?php echo $fee_settings['consultation_fee_emergency']; ?>,
             'follow_up': <?php echo $fee_settings['consultation_fee_follow_up']; ?>
         };
-
-        // Initialize DataTable
-        $(document).ready(function() {
-            $('#patientsTable').DataTable({
-                "pageLength": 10,
-                "lengthMenu": [10, 25, 50, 100],
-                "language": {
-                    "search": "Search patients:",
-                    "lengthMenu": "Show _MENU_ entries",
-                    "info": "Showing _START_ to _END_ of _TOTAL_ patients",
-                    "infoEmpty": "Showing 0 to 0 of 0 patients",
-                    "paginate": {
-                        "first": "First",
-                        "last": "Last",
-                        "next": "Next",
-                        "previous": "Previous"
-                    }
-                },
-                "order": [[7, 'desc']], // Sort by registration date descending
-                "columnDefs": [
-                    { "orderable": false, "targets": 8 } // Disable sorting for Actions column
-                ]
-            });
-        });
 
         // Update consultation fee based on patient type
         function updateConsultationFee() {

@@ -16,6 +16,35 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] != 'doctor') {
 $success_message = '';
 $error_message = '';
 
+// Handle Delete Prescription
+if (isset($_GET['delete_prescription'])) {
+    $prescription_id = $_GET['delete_prescription'];
+    
+    try {
+        // Verify that this prescription belongs to a checking form by this doctor
+        $verify_stmt = $pdo->prepare("SELECT p.id 
+                                    FROM prescriptions p 
+                                    JOIN checking_forms cf ON p.checking_form_id = cf.id 
+                                    WHERE p.id = ? AND cf.doctor_id = ?");
+        $verify_stmt->execute([$prescription_id, $_SESSION['user_id']]);
+        $prescription = $verify_stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($prescription) {
+            $delete_stmt = $pdo->prepare("DELETE FROM prescriptions WHERE id = ?");
+            $delete_stmt->execute([$prescription_id]);
+            $success_message = "Prescription deleted successfully!";
+        } else {
+            $error_message = "Prescription not found or you don't have permission to delete it!";
+        }
+        
+        header("Location: ".$_SERVER['PHP_SELF']."#prescriptions-section");
+        exit;
+        
+    } catch (PDOException $e) {
+        $error_message = "Error deleting prescription: " . $e->getMessage();
+    }
+}
+
 // Handle Add Multiple Prescriptions
 if (isset($_POST['add_prescription'])) {
     $checking_form_id = $_POST['checking_form_id'];
@@ -31,7 +60,7 @@ if (isset($_POST['add_prescription'])) {
         // Loop through all medicines and insert each one
         for ($i = 0; $i < count($medicine_names); $i++) {
             if (!empty($medicine_names[$i])) {
-                $stmt = $pdo->prepare("INSERT INTO prescriptions (checking_form_id, medicine_name, dosage, frequency, duration, instructions, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')");
+                $stmt = $pdo->prepare("INSERT INTO prescriptions (checking_form_id, medicine_name, dosage, frequency, duration, instructions, status) VALUES (?, ?, ?, ?, ?, ?, 'prescribed')");
                 $stmt->execute([
                     $checking_form_id, 
                     $medicine_names[$i], 
@@ -61,7 +90,6 @@ if (isset($_POST['add_lab_test'])) {
     $checking_form_id = $_POST['checking_form_id'];
     $test_types = $_POST['test_type'];
     $test_descriptions = $_POST['test_description'];
-    $conducted_by = $_SESSION['user_id'];
     
     try {
         $pdo->beginTransaction();
@@ -70,12 +98,11 @@ if (isset($_POST['add_lab_test'])) {
         $tests_added = 0;
         for ($i = 0; $i < count($test_types); $i++) {
             if (!empty($test_types[$i])) {
-                $stmt = $pdo->prepare("INSERT INTO laboratory_tests (checking_form_id, test_type, test_description, conducted_by, status) VALUES (?, ?, ?, ?, 'pending')");
+                $stmt = $pdo->prepare("INSERT INTO laboratory_tests (checking_form_id, test_type, test_description, status) VALUES (?, ?, ?, 'pending')");
                 $stmt->execute([
                     $checking_form_id, 
                     $test_types[$i], 
-                    $test_descriptions[$i] ?? '', 
-                    $conducted_by
+                    $test_descriptions[$i] ?? ''
                 ]);
                 $tests_added++;
             }
@@ -177,15 +204,18 @@ $total_prescriptions_stmt->execute([$_SESSION['user_id']]);
 $total_prescriptions = $total_prescriptions_stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Get total lab tests by this doctor
-$total_tests_stmt = $pdo->prepare("SELECT COUNT(*) as total FROM laboratory_tests WHERE conducted_by = ?");
+$total_tests_stmt = $pdo->prepare("SELECT COUNT(*) as total FROM laboratory_tests lt 
+                                 JOIN checking_forms cf ON lt.checking_form_id = cf.id 
+                                 WHERE cf.doctor_id = ?");
 $total_tests_stmt->execute([$_SESSION['user_id']]);
 $total_tests = $total_tests_stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Get completed lab tests for this doctor
-$completed_lab_tests = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests lt 
-                                  JOIN checking_forms cf ON lt.checking_form_id = cf.id 
-                                  WHERE cf.doctor_id = " . $_SESSION['user_id'] . " 
-                                  AND lt.status = 'completed'")->fetch(PDO::FETCH_ASSOC)['total'];
+$completed_lab_tests_stmt = $pdo->prepare("SELECT COUNT(*) as total FROM laboratory_tests lt 
+                                        JOIN checking_forms cf ON lt.checking_form_id = cf.id 
+                                        WHERE cf.doctor_id = ? AND lt.status = 'completed'");
+$completed_lab_tests_stmt->execute([$_SESSION['user_id']]);
+$completed_lab_tests = $completed_lab_tests_stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Get all patients for dropdown
 $patients = $pdo->query("SELECT * FROM patients ORDER BY full_name")->fetchAll(PDO::FETCH_ASSOC);
@@ -198,38 +228,56 @@ $recent_patients = $pdo->query("SELECT p.*,
                                LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
 
 // Get recent checking forms by this doctor
-$recent_checkups = $pdo->query("SELECT cf.*, p.full_name as patient_name, p.card_no 
+$recent_checkups_stmt = $pdo->prepare("SELECT cf.*, p.full_name as patient_name, p.card_no 
                               FROM checking_forms cf 
                               JOIN patients p ON cf.patient_id = p.id 
-                              WHERE cf.doctor_id = " . $_SESSION['user_id'] . "
+                              WHERE cf.doctor_id = ?
                               ORDER BY cf.created_at DESC 
-                              LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
+                              LIMIT 5");
+$recent_checkups_stmt->execute([$_SESSION['user_id']]);
+$recent_checkups = $recent_checkups_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get available checking forms for prescriptions and lab tests
-$checking_forms = $pdo->query("SELECT cf.*, p.full_name as patient_name, p.card_no 
+$checking_forms_stmt = $pdo->prepare("SELECT cf.*, p.full_name as patient_name, p.card_no 
                              FROM checking_forms cf 
                              JOIN patients p ON cf.patient_id = p.id 
-                             WHERE cf.doctor_id = " . $_SESSION['user_id'] . "
-                             ORDER BY cf.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+                             WHERE cf.doctor_id = ?
+                             ORDER BY cf.created_at DESC");
+$checking_forms_stmt->execute([$_SESSION['user_id']]);
+$checking_forms = $checking_forms_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get laboratory test results for this doctor - LIMITED for initial display
+// Get prescriptions for this doctor with delete option
+$prescriptions_stmt = $pdo->prepare("SELECT p.*, cf.id as checking_form_id, pat.full_name as patient_name, pat.card_no
+                                   FROM prescriptions p 
+                                   JOIN checking_forms cf ON p.checking_form_id = cf.id 
+                                   JOIN patients pat ON cf.patient_id = pat.id 
+                                   WHERE cf.doctor_id = ?
+                                   ORDER BY p.created_at DESC 
+                                   LIMIT 10");
+$prescriptions_stmt->execute([$_SESSION['user_id']]);
+$prescriptions = $prescriptions_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Get laboratory test results for this doctor - FIXED: Can't use placeholder for LIMIT
 $lab_results_limit = 6;
-$lab_results = $pdo->query("SELECT lt.*, p.full_name as patient_name, p.card_no, 
-                           u.full_name as lab_technician, cf.symptoms, cf.diagnosis
+$lab_results_sql = "SELECT lt.*, p.full_name as patient_name, p.card_no, cf.symptoms, cf.diagnosis
                     FROM laboratory_tests lt 
                     JOIN checking_forms cf ON lt.checking_form_id = cf.id 
                     JOIN patients p ON cf.patient_id = p.id 
-                    LEFT JOIN users u ON lt.conducted_by = u.id 
-                    WHERE cf.doctor_id = " . $_SESSION['user_id'] . "
+                    WHERE cf.doctor_id = ?
                     AND lt.status = 'completed'
                     ORDER BY lt.updated_at DESC 
-                    LIMIT $lab_results_limit")->fetchAll(PDO::FETCH_ASSOC);
+                    LIMIT " . (int)$lab_results_limit;
+                    
+$lab_results_stmt = $pdo->prepare($lab_results_sql);
+$lab_results_stmt->execute([$_SESSION['user_id']]);
+$lab_results = $lab_results_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get total count for "See All"
-$total_results_stmt = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests lt 
+$total_results_stmt = $pdo->prepare("SELECT COUNT(*) as total FROM laboratory_tests lt 
                                  JOIN checking_forms cf ON lt.checking_form_id = cf.id 
-                                 WHERE cf.doctor_id = " . $_SESSION['user_id'] . "
+                                 WHERE cf.doctor_id = ?
                                  AND lt.status = 'completed'");
+$total_results_stmt->execute([$_SESSION['user_id']]);
 $total_results = $total_results_stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Get current user data
@@ -665,6 +713,16 @@ $current_time = date('h:i A');
             transform: translateY(-2px);
         }
 
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
+        }
+
         /* Forms */
         .form-grid {
             display: grid;
@@ -832,7 +890,7 @@ $current_time = date('h:i A');
             font-size: 1.1rem;
         }
 
-        /* Laboratory Results Section - IMPROVED with Dropdown */
+        /* Laboratory Results Section */
         .lab-results-section {
             margin-top: 30px;
         }
@@ -892,7 +950,7 @@ $current_time = date('h:i A');
             transform: translateY(-2px);
         }
         
-        /* NEW: Dropdown Results Container */
+        /* Results Container */
         .results-dropdown-container {
             background: white;
             border-radius: 12px;
@@ -1057,13 +1115,60 @@ $current_time = date('h:i A');
             gap: 8px;
         }
         
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-            flex-wrap: wrap;
+        /* Prescriptions List */
+        .prescription-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #3b82f6;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
         }
         
+        .prescription-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .prescription-title {
+            font-weight: 600;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .prescription-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .prescription-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .detail-label {
+            font-size: 0.8rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+        
+        .detail-value {
+            font-size: 0.9rem;
+            color: #1e293b;
+            font-weight: 600;
+        }
+
         /* Empty State */
         .empty-state {
             text-align: center;
@@ -1347,6 +1452,10 @@ $current_time = date('h:i A');
                 width: 95%;
                 height: 95vh;
             }
+            
+            .prescription-details {
+                grid-template-columns: 1fr;
+            }
         }
         
         @media (max-width: 480px) {
@@ -1379,7 +1488,7 @@ $current_time = date('h:i A');
         }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-     <link rel="icon" href="../images/logo.jpg">
+    <link rel="icon" href="../images/logo.jpg">
 </head>
 <body>
 
@@ -1531,7 +1640,96 @@ $current_time = date('h:i A');
             </div>
         </div>
 
-        <!-- Laboratory Results Section - IMPROVED with Dropdown -->
+        <!-- Prescriptions Section with Delete Option -->
+        <div class="table-card" id="prescriptions-section">
+            <div class="section-header">
+                <h3 class="section-title">
+                    <i class="fas fa-prescription"></i> Recent Prescriptions
+                </h3>
+                <div class="section-actions">
+                    <span class="results-count">
+                        <?php echo count($prescriptions); ?> prescriptions
+                    </span>
+                    <button class="see-all-btn" onclick="scrollToPrescriptionForm()">
+                        <i class="fas fa-plus"></i> Add New Prescription
+                    </button>
+                </div>
+            </div>
+            
+            <?php if (empty($prescriptions)): ?>
+                <div class="empty-state">
+                    <i class="fas fa-prescription"></i>
+                    <h4>No Prescriptions Found</h4>
+                    <p>You haven't prescribed any medications yet. Start by adding a prescription below.</p>
+                    <div class="action-buttons" style="justify-content: center; margin-top: 20px;">
+                        <button class="btn btn-primary" onclick="scrollToPrescriptionForm()">
+                            <i class="fas fa-plus"></i> Add First Prescription
+                        </button>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="prescriptions-list">
+                    <?php foreach ($prescriptions as $prescription): ?>
+                    <div class="prescription-item">
+                        <div class="prescription-header">
+                            <div class="prescription-title">
+                                <i class="fas fa-pills"></i> 
+                                <?php echo htmlspecialchars($prescription['medicine_name']); ?>
+                            </div>
+                            <div class="prescription-actions">
+                                <span class="badge <?php echo $prescription['status'] == 'prescribed' ? 'badge-info' : 'badge-success'; ?>">
+                                    <?php echo ucfirst($prescription['status']); ?>
+                                </span>
+                                <button class="btn btn-danger btn-sm" onclick="confirmDelete(<?php echo $prescription['id']; ?>)">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="prescription-details">
+                            <div class="detail-item">
+                                <span class="detail-label">Patient</span>
+                                <span class="detail-value"><?php echo htmlspecialchars($prescription['patient_name']); ?></span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Card No</span>
+                                <span class="detail-value"><?php echo htmlspecialchars($prescription['card_no']); ?></span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Dosage</span>
+                                <span class="detail-value"><?php echo htmlspecialchars($prescription['dosage']); ?></span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Frequency</span>
+                                <span class="detail-value"><?php echo htmlspecialchars($prescription['frequency'] ?? 'N/A'); ?></span>
+                            </div>
+                        </div>
+                        
+                        <?php if (!empty($prescription['duration'])): ?>
+                        <div class="detail-item">
+                            <span class="detail-label">Duration</span>
+                            <span class="detail-value"><?php echo htmlspecialchars($prescription['duration']); ?></span>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if (!empty($prescription['instructions'])): ?>
+                        <div class="detail-item">
+                            <span class="detail-label">Instructions</span>
+                            <span class="detail-value"><?php echo htmlspecialchars($prescription['instructions']); ?></span>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div class="detail-item">
+                            <span class="detail-label">Prescribed On</span>
+                            <span class="detail-value"><?php echo date('M j, Y H:i', strtotime($prescription['created_at'])); ?></span>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- Laboratory Results Section -->
         <div class="lab-results-section">
             <div class="table-card">
                 <div class="section-header">
@@ -1562,7 +1760,7 @@ $current_time = date('h:i A');
                         </div>
                     </div>
                 <?php else: ?>
-                    <!-- NEW: Dropdown Results Container -->
+                    <!-- Results Container -->
                     <div class="results-dropdown-container">
                         <div class="dropdown-header active" onclick="toggleResultsDropdown()">
                             <div class="dropdown-title">
@@ -1593,10 +1791,6 @@ $current_time = date('h:i A');
                                         <div class="info-row">
                                             <span class="info-label">Card No:</span>
                                             <span class="info-value"><?php echo htmlspecialchars($result['card_no']); ?></span>
-                                        </div>
-                                        <div class="info-row">
-                                            <span class="info-label">Lab Technician:</span>
-                                            <span class="info-value"><?php echo htmlspecialchars($result['lab_technician'] ?? 'Not specified'); ?></span>
                                         </div>
                                         <div class="info-row">
                                             <span class="info-label">Completed Date:</span>
@@ -2186,6 +2380,13 @@ $current_time = date('h:i A');
             });
         }
 
+        // Function to confirm prescription deletion
+        function confirmDelete(prescriptionId) {
+            if (confirm('Are you sure you want to delete this prescription? This action cannot be undone.')) {
+                window.location.href = '<?php echo $_SERVER['PHP_SELF']; ?>?delete_prescription=' + prescriptionId;
+            }
+        }
+
         // Function to validate lab test form before submission
         function validateLabTestForm() {
             const testTypes = document.getElementsByName('test_type[]');
@@ -2213,7 +2414,7 @@ $current_time = date('h:i A');
             }
         });
 
-        // NEW: Function to toggle results dropdown
+        // Function to toggle results dropdown
         function toggleResultsDropdown() {
             const header = document.querySelector('.dropdown-header');
             const content = document.querySelector('.dropdown-content');
@@ -2328,6 +2529,9 @@ $current_time = date('h:i A');
                         <button class="btn btn-primary" onclick="scrollToPrescriptionForm()">
                             <i class="fas fa-plus"></i> Add Prescription
                         </button>
+                        <button class="btn btn-warning" onclick="scrollToPrescriptionsList()">
+                            <i class="fas fa-list"></i> View Prescriptions
+                        </button>
                     </div>
                     
                     <div class="action-grid">
@@ -2341,6 +2545,20 @@ $current_time = date('h:i A');
                             <div class="action-buttons">
                                 <button class="btn btn-primary" onclick="scrollToPrescriptionForm()">
                                     <i class="fas fa-plus"></i> Add Prescription
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="action-card" onclick="scrollToPrescriptionsList()">
+                            <h4><i class="fas fa-list"></i> Manage Prescriptions</h4>
+                            <ul class="action-list">
+                                <li><i class="fas fa-check"></i> View all prescriptions</li>
+                                <li><i class="fas fa-check"></i> Delete prescriptions</li>
+                                <li><i class="fas fa-check"></i> Track medication status</li>
+                            </ul>
+                            <div class="action-buttons">
+                                <button class="btn btn-warning" onclick="scrollToPrescriptionsList()">
+                                    <i class="fas fa-list"></i> View All
                                 </button>
                             </div>
                         </div>
@@ -2429,6 +2647,12 @@ $current_time = date('h:i A');
 
         function scrollToPrescriptionForm() {
             document.getElementById('prescription-form').scrollIntoView({ 
+                behavior: 'smooth' 
+            });
+        }
+
+        function scrollToPrescriptionsList() {
+            document.getElementById('prescriptions-section').scrollIntoView({ 
                 behavior: 'smooth' 
             });
         }

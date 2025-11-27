@@ -61,37 +61,6 @@ if (isset($_POST['update_profile'])) {
     }
 }
 
-// Handle Add New Prescription by Doctor
-if (isset($_POST['add_prescription'])) {
-    $patient_id = $_POST['patient_id'];
-    $medicine_name = $_POST['medicine_name'];
-    $dosage = $_POST['dosage'];
-    $frequency = $_POST['frequency'];
-    $duration = $_POST['duration'];
-    $instructions = $_POST['instructions'] ?? '';
-    
-    try {
-        // Get checking_form_id for the patient
-        $checking_stmt = $pdo->prepare("SELECT id FROM checking_forms WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1");
-        $checking_stmt->execute([$patient_id]);
-        $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($checking_form) {
-            $checking_form_id = $checking_form['id'];
-            
-            // Insert new prescription
-            $stmt = $pdo->prepare("INSERT INTO prescriptions (checking_form_id, medicine_name, dosage, frequency, duration, instructions, status) VALUES (?, ?, ?, ?, ?, ?, 'pending')");
-            $stmt->execute([$checking_form_id, $medicine_name, $dosage, $frequency, $duration, $instructions]);
-            
-            $success_message = "Prescription added successfully!";
-        } else {
-            $error_message = "No checking form found for this patient!";
-        }
-    } catch (PDOException $e) {
-        $error_message = "Error adding prescription: " . $e->getMessage();
-    }
-}
-
 // Handle Dispense All Prescriptions AND Lab Tests with Prices for a Patient
 if (isset($_POST['dispense_all_prescriptions'])) {
     $patient_id = $_POST['patient_id'];
@@ -115,18 +84,19 @@ if (isset($_POST['dispense_all_prescriptions'])) {
             foreach ($prescriptions_data as $prescription_id => $data) {
                 $medicine_available = $data['available'] ?? 'no';
                 $price = floatval($data['price'] ?? 0);
+                $alternative_medicine = $data['alternative'] ?? null;
                 
                 if ($medicine_available === 'yes') {
-                    // Update prescription status to dispensed
-                    $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'dispensed' WHERE id = ?");
-                    $stmt->execute([$prescription_id]);
+                    // Update prescription status to dispensed with price
+                    $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'dispensed', medicine_price = ?, alternative_medicine = NULL, is_available = 'yes' WHERE id = ?");
+                    $stmt->execute([$price, $prescription_id]);
                     
                     // Add to total medicine amount
                     $total_medicine_amount += $price;
                 } else {
-                    // Mark as not available
-                    $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'not_available' WHERE id = ?");
-                    $stmt->execute([$prescription_id]);
+                    // Mark as not available with alternative medicine
+                    $stmt = $pdo->prepare("UPDATE prescriptions SET status = 'not_available', alternative_medicine = ?, is_available = 'no' WHERE id = ?");
+                    $stmt->execute([$alternative_medicine, $prescription_id]);
                 }
             }
             
@@ -135,13 +105,22 @@ if (isset($_POST['dispense_all_prescriptions'])) {
                 $lab_test_price = floatval($data['price'] ?? 0);
                 
                 if ($lab_test_price > 0) {
+                    // Update lab test with price
+                    $stmt = $pdo->prepare("UPDATE laboratory_tests SET lab_price = ? WHERE id = ?");
+                    $stmt->execute([$lab_test_price, $lab_test_id]);
+                    
                     // Add lab test price to total lab amount
                     $total_lab_amount += $lab_test_price;
                 }
             }
             
-            // Calculate total amount
-            $total_amount = $total_medicine_amount + $total_lab_amount;
+            // Calculate total amount (including consultation fee)
+            $patient_stmt = $pdo->prepare("SELECT consultation_fee FROM patients WHERE id = ?");
+            $patient_stmt->execute([$patient_id]);
+            $patient = $patient_stmt->fetch(PDO::FETCH_ASSOC);
+            $consultation_fee = $patient['consultation_fee'] ?? 0;
+            
+            $total_amount = $total_medicine_amount + $total_lab_amount + $consultation_fee;
             
             // Create or update payment record with separate medicine and lab amounts
             if ($total_amount > 0) {
@@ -157,13 +136,14 @@ if (isset($_POST['dispense_all_prescriptions'])) {
                     // Update existing payment
                     $payment_stmt = $pdo->prepare("
                         UPDATE payments 
-                        SET amount = ?, medicine_amount = ?, lab_amount = ?, processed_by = ?, created_at = NOW()
+                        SET amount = ?, medicine_amount = ?, lab_amount = ?, consultation_fee = ?, processed_by = ?, updated_at = NOW()
                         WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'
                     ");
                     $payment_stmt->execute([
                         $total_amount, 
                         $total_medicine_amount, 
                         $total_lab_amount,
+                        $consultation_fee,
                         $_SESSION['user_id'],
                         $patient_id, 
                         $checking_form_id
@@ -171,8 +151,8 @@ if (isset($_POST['dispense_all_prescriptions'])) {
                 } else {
                     // Create new payment record
                     $payment_stmt = $pdo->prepare("
-                        INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, payment_type, status, processed_by) 
-                        VALUES (?, ?, ?, ?, ?, 'medicine_and_lab', 'pending', ?)
+                        INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, consultation_fee, payment_type, status, processed_by) 
+                        VALUES (?, ?, ?, ?, ?, ?, 'medicine_and_lab', 'pending', ?)
                     ");
                     $payment_stmt->execute([
                         $patient_id, 
@@ -180,12 +160,14 @@ if (isset($_POST['dispense_all_prescriptions'])) {
                         $total_amount, 
                         $total_medicine_amount, 
                         $total_lab_amount,
+                        $consultation_fee,
                         $_SESSION['user_id']
                     ]);
                 }
             }
             
             $success_message = "Prescriptions and lab tests processed successfully!<br>";
+            $success_message .= "Consultation Fee: TSh " . number_format($consultation_fee, 2) . "<br>";
             $success_message .= "Medicine Amount: TSh " . number_format($total_medicine_amount, 2) . "<br>";
             $success_message .= "Lab Amount: TSh " . number_format($total_lab_amount, 2) . "<br>";
             $success_message .= "Total Amount: TSh " . number_format($total_amount, 2);
@@ -220,8 +202,14 @@ if (isset($_POST['edit_total_price'])) {
         if ($checking_form) {
             $checking_form_id = $checking_form['id'];
             
+            // Get consultation fee
+            $patient_stmt = $pdo->prepare("SELECT consultation_fee FROM patients WHERE id = ?");
+            $patient_stmt->execute([$patient_id]);
+            $patient = $patient_stmt->fetch(PDO::FETCH_ASSOC);
+            $consultation_fee = $patient['consultation_fee'] ?? 0;
+            
             // Calculate new total amount
-            $new_total_amount = $new_medicine_amount + $new_lab_amount;
+            $new_total_amount = $new_medicine_amount + $new_lab_amount + $consultation_fee;
             
             // Check if payment record exists
             $check_payment_stmt = $pdo->prepare("
@@ -235,7 +223,7 @@ if (isset($_POST['edit_total_price'])) {
                 // Update existing payment amount
                 $payment_stmt = $pdo->prepare("
                     UPDATE payments 
-                    SET amount = ?, medicine_amount = ?, lab_amount = ?, notes = ?, processed_by = ?
+                    SET amount = ?, medicine_amount = ?, lab_amount = ?, notes = ?, processed_by = ?, updated_at = NOW()
                     WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'
                 ");
                 $payment_stmt->execute([
@@ -250,8 +238,8 @@ if (isset($_POST['edit_total_price'])) {
             } else {
                 // Create new payment record
                 $payment_stmt = $pdo->prepare("
-                    INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, payment_type, status, processed_by, notes) 
-                    VALUES (?, ?, ?, ?, ?, 'medicine_and_lab', 'pending', ?, ?)
+                    INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, consultation_fee, payment_type, status, processed_by, notes) 
+                    VALUES (?, ?, ?, ?, ?, ?, 'medicine_and_lab', 'pending', ?, ?)
                 ");
                 $payment_stmt->execute([
                     $patient_id, 
@@ -259,12 +247,14 @@ if (isset($_POST['edit_total_price'])) {
                     $new_total_amount, 
                     $new_medicine_amount, 
                     $new_lab_amount,
+                    $consultation_fee,
                     $_SESSION['user_id'],
                     $reason
                 ]);
             }
             
             $success_message = "Price updated successfully!<br>";
+            $success_message .= "Consultation Fee: TSh " . number_format($consultation_fee, 2) . "<br>";
             $success_message .= "Medicine Amount: TSh " . number_format($new_medicine_amount, 2) . "<br>";
             $success_message .= "Lab Amount: TSh " . number_format($new_lab_amount, 2) . "<br>";
             $success_message .= "Total Amount: TSh " . number_format($new_total_amount, 2);
@@ -294,8 +284,12 @@ if (isset($_POST['delete_dispensed_card'])) {
             $checking_form_id = $checking_form['id'];
             
             // Change prescription status back to pending (so it appears in pending section again)
-            $update_stmt = $pdo->prepare("UPDATE prescriptions SET status = 'pending' WHERE checking_form_id = ? AND status = 'dispensed'");
+            $update_stmt = $pdo->prepare("UPDATE prescriptions SET status = 'pending', medicine_price = 0, alternative_medicine = NULL, is_available = 'yes' WHERE checking_form_id = ? AND status = 'dispensed'");
             $update_stmt->execute([$checking_form_id]);
+            
+            // Reset lab test prices
+            $lab_stmt = $pdo->prepare("UPDATE laboratory_tests SET lab_price = 0 WHERE checking_form_id = ?");
+            $lab_stmt->execute([$checking_form_id]);
             
             // Delete the payment record for medicine_and_lab
             $delete_stmt = $pdo->prepare("DELETE FROM payments WHERE patient_id = ? AND checking_form_id = ? AND payment_type = 'medicine_and_lab'");
@@ -314,108 +308,6 @@ if (isset($_POST['delete_dispensed_card'])) {
     }
 }
 
-// Handle CRUD Operations for Payments
-if (isset($_POST['add_payment'])) {
-    $patient_id = $_POST['patient_id'];
-    $medicine_amount = $_POST['medicine_amount'];
-    $lab_amount = $_POST['lab_amount'];
-    $payment_type = $_POST['payment_type'];
-    $status = $_POST['status'];
-    $notes = $_POST['notes'] ?? '';
-    
-    try {
-        // Get checking_form_id for the patient
-        $checking_stmt = $pdo->prepare("SELECT id FROM checking_forms WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1");
-        $checking_stmt->execute([$patient_id]);
-        $checking_form = $checking_stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if ($checking_form) {
-            $checking_form_id = $checking_form['id'];
-            $total_amount = $medicine_amount + $lab_amount;
-            
-            // Insert new payment
-            $stmt = $pdo->prepare("
-                INSERT INTO payments (patient_id, checking_form_id, amount, medicine_amount, lab_amount, payment_type, status, processed_by, notes) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $stmt->execute([
-                $patient_id, 
-                $checking_form_id, 
-                $total_amount, 
-                $medicine_amount, 
-                $lab_amount,
-                $payment_type,
-                $status,
-                $_SESSION['user_id'],
-                $notes
-            ]);
-            
-            $success_message = "Payment record added successfully!";
-        } else {
-            $error_message = "No checking form found for this patient!";
-        }
-    } catch (PDOException $e) {
-        $error_message = "Error adding payment: " . $e->getMessage();
-    }
-}
-
-// Handle Update Payment
-if (isset($_POST['update_payment'])) {
-    $payment_id = $_POST['payment_id'];
-    $medicine_amount = $_POST['medicine_amount'];
-    $lab_amount = $_POST['lab_amount'];
-    $payment_type = $_POST['payment_type'];
-    $status = $_POST['status'];
-    $notes = $_POST['notes'] ?? '';
-    
-    try {
-        $total_amount = $medicine_amount + $lab_amount;
-        
-        $stmt = $pdo->prepare("
-            UPDATE payments 
-            SET amount = ?, medicine_amount = ?, lab_amount = ?, payment_type = ?, status = ?, notes = ?, processed_by = ?
-            WHERE id = ?
-        ");
-        $stmt->execute([
-            $total_amount, 
-            $medicine_amount, 
-            $lab_amount,
-            $payment_type,
-            $status,
-            $notes,
-            $_SESSION['user_id'],
-            $payment_id
-        ]);
-        
-        $success_message = "Payment record updated successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error updating payment: " . $e->getMessage();
-    }
-}
-
-// Handle Delete Payment
-if (isset($_POST['delete_payment'])) {
-    $payment_id = $_POST['payment_id'];
-    
-    try {
-        $stmt = $pdo->prepare("DELETE FROM payments WHERE id = ?");
-        $stmt->execute([$payment_id]);
-        
-        $success_message = "Payment record deleted successfully!";
-    } catch (PDOException $e) {
-        $error_message = "Error deleting payment: " . $e->getMessage();
-    }
-}
-
-// Handle Edit Payment (Load data for editing)
-$editing_payment = null;
-if (isset($_GET['edit_payment'])) {
-    $payment_id = $_GET['edit_payment'];
-    $stmt = $pdo->prepare("SELECT * FROM payments WHERE id = ?");
-    $stmt->execute([$payment_id]);
-    $editing_payment = $stmt->fetch(PDO::FETCH_ASSOC);
-}
-
 // Get statistics for dashboard
 $total_patients = $pdo->query("SELECT COUNT(*) as total FROM patients")->fetch(PDO::FETCH_ASSOC)['total'];
 $today_patients = $pdo->query("SELECT COUNT(*) as total FROM patients WHERE DATE(created_at) = CURDATE()")->fetch(PDO::FETCH_ASSOC)['total'];
@@ -428,52 +320,112 @@ $total_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM paym
 $pending_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'pending'")->fetch(PDO::FETCH_ASSOC)['total'];
 $today_revenue = $pdo->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE DATE(created_at) = CURDATE() AND status = 'paid'")->fetch(PDO::FETCH_ASSOC)['total'];
 
-// Get pending prescriptions grouped by patient WITH LAB RESULTS AND PRICES
-$pending_patients = $pdo->query("SELECT 
-    p.id as patient_id,
-    p.full_name as patient_name, 
-    p.card_no, 
-    p.age, 
-    p.gender,
-    u.full_name as doctor_name,
-    cf.diagnosis,
-    cf.symptoms,
-    COUNT(pr.id) as prescription_count,
-    GROUP_CONCAT(CONCAT(pr.medicine_name, '|', pr.dosage, '|', pr.frequency, '|', pr.duration, '|', pr.instructions, '|', pr.id) SEPARATOR ';;') as prescriptions_data,
-    (SELECT GROUP_CONCAT(CONCAT(lt.test_type, '|', lt.results, '|', lt.id) SEPARATOR ';;') 
-     FROM laboratory_tests lt 
-     WHERE lt.checking_form_id = cf.id AND lt.status = 'completed') as lab_results
-FROM patients p 
-JOIN checking_forms cf ON p.id = cf.patient_id 
-JOIN prescriptions pr ON cf.id = pr.checking_form_id 
-JOIN users u ON cf.doctor_id = u.id 
-WHERE pr.status = 'pending'
-GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender, u.full_name, cf.diagnosis, cf.symptoms
-ORDER BY MAX(pr.created_at) DESC")->fetchAll(PDO::FETCH_ASSOC);
+// FIXED: Get pending prescriptions with patient data - SIMPLE AND WORKING QUERY
+$pending_patients = $pdo->query("
+    SELECT 
+        p.id as patient_id,
+        p.full_name as patient_name, 
+        p.card_no, 
+        p.age, 
+        p.gender,
+        p.consultation_fee,
+        u.full_name as doctor_name,
+        cf.diagnosis,
+        cf.symptoms,
+        cf.id as checking_form_id
+    FROM patients p 
+    JOIN checking_forms cf ON p.id = cf.patient_id 
+    JOIN prescriptions pr ON cf.id = pr.checking_form_id 
+    JOIN users u ON cf.doctor_id = u.id 
+    WHERE pr.status = 'pending'
+    GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender, p.consultation_fee, 
+             u.full_name, cf.diagnosis, cf.symptoms, cf.id
+    ORDER BY cf.created_at DESC
+")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get completed prescriptions grouped by patient WITH LAB RESULTS AND PRICES
-$completed_patients = $pdo->query("SELECT 
-    p.id as patient_id,
-    p.full_name as patient_name, 
-    p.card_no, 
-    p.age, 
-    p.gender,
-    u.full_name as doctor_name,
-    cf.diagnosis,
-    cf.id as checking_form_id,
-    COUNT(pr.id) as prescription_count,
-    GROUP_CONCAT(CONCAT(pr.medicine_name, '|', pr.dosage, '|', pr.frequency, '|', pr.duration, '|', pr.instructions, '|', pr.id) SEPARATOR ';;') as prescriptions_data,
-    (SELECT GROUP_CONCAT(CONCAT(lt.test_type, '|', lt.results, '|', lt.id) SEPARATOR ';;') 
-     FROM laboratory_tests lt 
-     WHERE lt.checking_form_id = cf.id AND lt.status = 'completed') as lab_results
-FROM patients p 
-JOIN checking_forms cf ON p.id = cf.patient_id 
-JOIN prescriptions pr ON cf.id = pr.checking_form_id 
-JOIN users u ON cf.doctor_id = u.id 
-WHERE pr.status = 'dispensed'
-GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender, u.full_name, cf.diagnosis, cf.id
-ORDER BY MAX(pr.created_at) DESC 
-LIMIT 20")->fetchAll(PDO::FETCH_ASSOC);
+// Now get detailed prescriptions and lab tests for each patient
+foreach ($pending_patients as &$patient) {
+    $checking_form_id = $patient['checking_form_id'];
+    
+    // Get prescriptions count and data
+    $prescriptions_stmt = $pdo->prepare("
+        SELECT COUNT(*) as prescription_count 
+        FROM prescriptions 
+        WHERE checking_form_id = ? AND status = 'pending'
+    ");
+    $prescriptions_stmt->execute([$checking_form_id]);
+    $patient['prescription_count'] = $prescriptions_stmt->fetch(PDO::FETCH_ASSOC)['prescription_count'];
+    
+    // Get prescriptions details
+    $prescriptions_data_stmt = $pdo->prepare("
+        SELECT * FROM prescriptions 
+        WHERE checking_form_id = ? AND status = 'pending'
+    ");
+    $prescriptions_data_stmt->execute([$checking_form_id]);
+    $patient['prescriptions'] = $prescriptions_data_stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Get lab tests
+    $lab_tests_stmt = $pdo->prepare("
+        SELECT * FROM laboratory_tests 
+        WHERE checking_form_id = ? AND status = 'completed'
+    ");
+    $lab_tests_stmt->execute([$checking_form_id]);
+    $patient['lab_tests'] = $lab_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// FIXED: Get completed prescriptions with patient data
+$completed_patients = $pdo->query("
+    SELECT 
+        p.id as patient_id,
+        p.full_name as patient_name, 
+        p.card_no, 
+        p.age, 
+        p.gender,
+        p.consultation_fee,
+        u.full_name as doctor_name,
+        cf.diagnosis,
+        cf.symptoms,
+        cf.id as checking_form_id
+    FROM patients p 
+    JOIN checking_forms cf ON p.id = cf.patient_id 
+    JOIN prescriptions pr ON cf.id = pr.checking_form_id 
+    JOIN users u ON cf.doctor_id = u.id 
+    WHERE pr.status = 'dispensed'
+    GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender, p.consultation_fee, 
+             u.full_name, cf.diagnosis, cf.symptoms, cf.id
+    ORDER BY cf.created_at DESC 
+    LIMIT 20
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// Now get detailed data for completed patients
+foreach ($completed_patients as &$patient) {
+    $checking_form_id = $patient['checking_form_id'];
+    
+    // Get prescriptions count and data
+    $prescriptions_stmt = $pdo->prepare("
+        SELECT COUNT(*) as prescription_count 
+        FROM prescriptions 
+        WHERE checking_form_id = ? AND status = 'dispensed'
+    ");
+    $prescriptions_stmt->execute([$checking_form_id]);
+    $patient['prescription_count'] = $prescriptions_stmt->fetch(PDO::FETCH_ASSOC)['prescription_count'];
+    
+    // Get prescriptions details
+    $prescriptions_data_stmt = $pdo->prepare("
+        SELECT * FROM prescriptions 
+        WHERE checking_form_id = ? AND status = 'dispensed'
+    ");
+    $prescriptions_data_stmt->execute([$checking_form_id]);
+    $patient['prescriptions'] = $prescriptions_data_stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Get lab tests
+    $lab_tests_stmt = $pdo->prepare("
+        SELECT * FROM laboratory_tests 
+        WHERE checking_form_id = ? AND status = 'completed'
+    ");
+    $lab_tests_stmt->execute([$checking_form_id]);
+    $patient['lab_tests'] = $lab_tests_stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
 // Get payment details with separate medicine and lab amounts
 $payment_details = [];
@@ -490,7 +442,7 @@ foreach ($all_payments as $payment) {
     $payment_details[$payment['patient_id']] = $payment;
 }
 
-// Get patients for dropdown in add prescription form
+// Get patients for dropdown
 $patients = $pdo->query("SELECT id, full_name, card_no FROM patients ORDER BY full_name")->fetchAll(PDO::FETCH_ASSOC);
 
 // Get recent patients with prescriptions
@@ -502,21 +454,34 @@ FROM patients p
 ORDER BY p.created_at DESC 
 LIMIT 10")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get laboratory results grouped by patient
-$lab_results_by_patient = $pdo->query("SELECT 
-    p.id as patient_id,
-    p.full_name as patient_name, 
-    p.card_no, 
-    p.age, 
-    p.gender,
-    GROUP_CONCAT(CONCAT(lt.test_type, ': ', lt.results) SEPARATOR ' | ') as all_tests,
-    COUNT(lt.id) as test_count
-FROM patients p 
-JOIN checking_forms cf ON p.id = cf.patient_id 
-JOIN laboratory_tests lt ON cf.id = lt.checking_form_id 
-WHERE lt.status = 'completed'
-GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender
-ORDER BY MAX(lt.updated_at) DESC")->fetchAll(PDO::FETCH_ASSOC);
+// FIXED: Get laboratory results grouped by patient
+$lab_results_by_patient = $pdo->query("
+    SELECT 
+        p.id as patient_id,
+        p.full_name as patient_name, 
+        p.card_no, 
+        p.age, 
+        p.gender,
+        COUNT(lt.id) as test_count
+    FROM patients p 
+    JOIN checking_forms cf ON p.id = cf.patient_id 
+    JOIN laboratory_tests lt ON cf.id = lt.checking_form_id 
+    WHERE lt.status = 'completed'
+    GROUP BY p.id, p.full_name, p.card_no, p.age, p.gender
+    ORDER BY MAX(lt.updated_at) DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// Now get lab test details for each patient
+foreach ($lab_results_by_patient as &$patient) {
+    $lab_details_stmt = $pdo->prepare("
+        SELECT lt.test_type, lt.results 
+        FROM laboratory_tests lt 
+        JOIN checking_forms cf ON lt.checking_form_id = cf.id 
+        WHERE cf.patient_id = ? AND lt.status = 'completed'
+    ");
+    $lab_details_stmt->execute([$patient['patient_id']]);
+    $patient['lab_details'] = $lab_details_stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
 // Get current user data
 $user_stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
@@ -1247,29 +1212,23 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             border: 2px solid #10b981;
         }
 
-        /* Add Prescription Form */
-        .add-prescription-form {
-            background: #f8fafc;
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 25px;
-            border-left: 4px solid #10b981;
+        /* Alternative Medicine Input */
+        .alternative-medicine {
+            background: #fff3cd;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+            border-left: 3px solid #ffc107;
         }
         
-        .prescription-form-row {
-            display: grid;
-            grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 15px;
-            align-items: end;
+        .alternative-medicine label {
+            font-weight: 600;
+            color: #856404;
+            font-size: 0.85rem;
+            margin-bottom: 5px;
+            display: block;
         }
-        
-        @media (max-width: 768px) {
-            .prescription-form-row {
-                grid-template-columns: 1fr;
-            }
-        }
-        
+
         /* Edit Price Form */
         .edit-price-form {
             background: #fff3cd;
@@ -1528,6 +1487,28 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             display: flex;
             gap: 10px;
             margin-top: 15px;
+        }
+
+        /* Consultation Fee Display */
+        .consultation-fee-display {
+            background: #fffbeb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #f59e0b;
+            text-align: center;
+        }
+        
+        .consultation-fee-label {
+            font-size: 0.9rem;
+            color: #92400e;
+            margin-bottom: 5px;
+        }
+        
+        .consultation-fee-value {
+            font-weight: bold;
+            color: #d97706;
+            font-size: 1.3rem;
         }
 
         /* MOBILE RESPONSIVE DESIGN */
@@ -1810,57 +1791,6 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                     <i class="fas fa-prescription"></i> Pending Prescriptions - Doctor's Instructions
                 </h3>
                 
-                <!-- Add New Prescription Form -->
-                <div class="add-prescription-form">
-                    <h4 style="margin-bottom: 15px; color: #1e293b;">
-                        <i class="fas fa-plus-circle"></i> Add New Prescription
-                    </h4>
-                    <form method="POST" action="" id="addPrescriptionForm">
-                        <div class="prescription-form-row">
-                            <div class="form-group">
-                                <label class="form-label">Patient *</label>
-                                <select name="patient_id" class="form-select" required>
-                                    <option value="">Select Patient</option>
-                                    <?php foreach ($patients as $patient): ?>
-                                    <option value="<?php echo $patient['id']; ?>">
-                                        <?php echo htmlspecialchars($patient['full_name']) . ' (' . htmlspecialchars($patient['card_no']) . ')'; ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Medicine Name *</label>
-                                <input type="text" name="medicine_name" class="form-input" placeholder="e.g., Amoxicillin" required>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Dosage *</label>
-                                <input type="text" name="dosage" class="form-input" placeholder="e.g., 500mg" required>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Frequency *</label>
-                                <input type="text" name="frequency" class="form-input" placeholder="e.g., 3 times daily" required>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Duration *</label>
-                                <input type="text" name="duration" class="form-input" placeholder="e.g., 7 days" required>
-                            </div>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="form-label">Instructions (Optional)</label>
-                            <textarea name="instructions" class="form-textarea" placeholder="Additional instructions..."></textarea>
-                        </div>
-                        
-                        <button type="submit" name="add_prescription" class="btn btn-success">
-                            <i class="fas fa-save"></i> Submit Prescription
-                        </button>
-                    </form>
-                </div>
-                
                 <?php if (empty($pending_patients)): ?>
                     <div class="empty-state">
                         <i class="fas fa-check-circle"></i>
@@ -1893,50 +1823,44 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                 </div>
                             </div>
                             
+                            <!-- Consultation Fee Display -->
+                            <div class="consultation-fee-display">
+                                <div class="consultation-fee-label">Consultation Fee</div>
+                                <div class="consultation-fee-value">TSh <?php echo number_format($patient['consultation_fee'], 2); ?></div>
+                            </div>
+                            
                             <?php if (!empty($patient['diagnosis'])): ?>
                             <div class="card-description">
-                                <strong>Doctor's Diagnosis:</strong><br>
+                                <strong><i class="fas fa-stethoscope"></i> Doctor's Diagnosis:</strong><br>
                                 <?php echo htmlspecialchars($patient['diagnosis']); ?>
                             </div>
                             <?php endif; ?>
                             
                             <?php if (!empty($patient['symptoms'])): ?>
                             <div class="card-description">
-                                <strong>Reported Symptoms:</strong><br>
+                                <strong><i class="fas fa-notes-medical"></i> Reported Symptoms:</strong><br>
                                 <?php echo htmlspecialchars($patient['symptoms']); ?>
                             </div>
                             <?php endif; ?>
                             
                             <!-- Laboratory Results Section WITH PRICING -->
-                            <?php if (!empty($patient['lab_results'])): ?>
+                            <?php if (!empty($patient['lab_tests'])): ?>
                             <div class="lab-results-section">
                                 <h5><i class="fas fa-vial"></i> Laboratory Test Results - Set Prices</h5>
-                                <?php 
-                                $lab_tests = explode(';;', $patient['lab_results']);
-                                $lab_total_price = 0;
-                                foreach ($lab_tests as $test):
-                                    $test_data = explode('|', $test);
-                                    if (count($test_data) >= 3):
-                                        $test_type = trim($test_data[0]);
-                                        $test_result = trim($test_data[1]);
-                                        $lab_test_id = trim($test_data[2]);
-                                ?>
+                                <?php foreach ($patient['lab_tests'] as $lab_test): ?>
                                 <div class="lab-test-item">
                                     <div class="test-details">
-                                        <div class="test-type"><?php echo htmlspecialchars($test_type); ?></div>
-                                        <div class="test-results"><?php echo htmlspecialchars($test_result); ?></div>
+                                        <div class="test-type"><?php echo htmlspecialchars($lab_test['test_type']); ?></div>
+                                        <div class="test-results"><?php echo htmlspecialchars($lab_test['results']); ?></div>
                                     </div>
                                     <div class="test-actions">
                                         <div class="price-input">
                                             <span>Price (TSh):</span>
-                                            <input type="number" name="lab_tests[<?php echo $lab_test_id; ?>][price]" class="form-input lab-price-input-field" min="0" step="0.01" value="0" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)" style="width: 100px; padding: 8px;">
+                                            <input type="number" name="lab_tests[<?php echo $lab_test['id']; ?>][price]" class="form-input lab-price-input-field" min="0" step="0.01" value="0" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)" style="width: 100px; padding: 8px;">
                                         </div>
                                     </div>
                                 </div>
-                                <?php 
-                                    endif;
-                                endforeach; 
-                                ?>
+                                <?php endforeach; ?>
                             </div>
                             <?php endif; ?>
                             
@@ -1951,52 +1875,44 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                     
                                     <div class="medications-list">
                                         <strong style="display: block; margin-bottom: 15px; color: #1e293b; font-size: 1rem;">Prescribed Medications:</strong>
-                                        <?php 
-                                        $prescriptions = explode(';;', $patient['prescriptions_data']);
-                                        foreach ($prescriptions as $prescription):
-                                            $med_data = explode('|', $prescription);
-                                            if (count($med_data) >= 6):
-                                                $med_name = $med_data[0];
-                                                $dosage = $med_data[1];
-                                                $frequency = $med_data[2];
-                                                $duration = $med_data[3];
-                                                $instructions = $med_data[4];
-                                                $prescription_id = $med_data[5];
-                                        ?>
+                                        <?php foreach ($patient['prescriptions'] as $prescription): ?>
                                         <div class="medication-item">
                                             <div class="medication-details">
-                                                <div class="medication-name"><?php echo htmlspecialchars($med_name); ?></div>
+                                                <div class="medication-name"><?php echo htmlspecialchars($prescription['medicine_name']); ?></div>
                                                 <div class="medication-specs">
-                                                    <strong>Dosage:</strong> <?php echo htmlspecialchars($dosage); ?> | 
-                                                    <strong>Frequency:</strong> <?php echo htmlspecialchars($frequency); ?> | 
-                                                    <strong>Duration:</strong> <?php echo htmlspecialchars($duration); ?>
-                                                    <?php if (!empty($instructions)): ?>
-                                                    | <strong>Instructions:</strong> <?php echo htmlspecialchars($instructions); ?>
+                                                    <strong>Dosage:</strong> <?php echo htmlspecialchars($prescription['dosage']); ?> | 
+                                                    <strong>Frequency:</strong> <?php echo htmlspecialchars($prescription['frequency']); ?> | 
+                                                    <strong>Duration:</strong> <?php echo htmlspecialchars($prescription['duration']); ?>
+                                                    <?php if (!empty($prescription['instructions'])): ?>
+                                                    | <strong>Instructions:</strong> <?php echo htmlspecialchars($prescription['instructions']); ?>
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
                                             <div class="medication-actions">
                                                 <div class="availability-toggle">
                                                     <div class="toggle-option">
-                                                        <input type="radio" id="available_yes_<?php echo $prescription_id; ?>" name="prescriptions[<?php echo $prescription_id; ?>][available]" value="yes" checked onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)">
-                                                        <label for="available_yes_<?php echo $prescription_id; ?>">Available</label>
+                                                        <input type="radio" id="available_yes_<?php echo $prescription['id']; ?>" name="prescriptions[<?php echo $prescription['id']; ?>][available]" value="yes" checked onchange="toggleAlternativeMedicine(<?php echo $prescription['id']; ?>)">
+                                                        <label for="available_yes_<?php echo $prescription['id']; ?>">Available</label>
                                                     </div>
                                                     <div class="toggle-option">
-                                                        <input type="radio" id="available_no_<?php echo $prescription_id; ?>" name="prescriptions[<?php echo $prescription_id; ?>][available]" value="no" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)">
-                                                        <label for="available_no_<?php echo $prescription_id; ?>">Not Available</label>
+                                                        <input type="radio" id="available_no_<?php echo $prescription['id']; ?>" name="prescriptions[<?php echo $prescription['id']; ?>][available]" value="no" onchange="toggleAlternativeMedicine(<?php echo $prescription['id']; ?>)">
+                                                        <label for="available_no_<?php echo $prescription['id']; ?>">Not Available</label>
                                                     </div>
+                                                </div>
+                                                
+                                                <!-- Alternative Medicine Input (Shows when not available) -->
+                                                <div class="alternative-medicine" id="alternative_<?php echo $prescription['id']; ?>" style="display: none;">
+                                                    <label>Alternative Medicine:</label>
+                                                    <input type="text" name="prescriptions[<?php echo $prescription['id']; ?>][alternative]" class="form-input" placeholder="Enter alternative medicine name">
                                                 </div>
                                                 
                                                 <div class="price-input">
                                                     <span>Price (TSh):</span>
-                                                    <input type="number" name="prescriptions[<?php echo $prescription_id; ?>][price]" class="form-input price-input-field" min="0" step="0.01" value="0" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)" style="width: 100px; padding: 8px;">
+                                                    <input type="number" name="prescriptions[<?php echo $prescription['id']; ?>][price]" class="form-input price-input-field" min="0" step="0.01" value="0" onchange="updateTotalAmount(<?php echo $patient['patient_id']; ?>)" style="width: 100px; padding: 8px;">
                                                 </div>
                                             </div>
                                         </div>
-                                        <?php 
-                                            endif;
-                                        endforeach; 
-                                        ?>
+                                        <?php endforeach; ?>
                                     </div>
                                     
                                     <div class="total-amount" id="totalAmount_<?php echo $patient['patient_id']; ?>">
@@ -2038,6 +1954,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                             $total_amount = $payment['amount'] ?? 0;
                             $medicine_amount = $payment['medicine_amount'] ?? 0;
                             $lab_amount = $payment['lab_amount'] ?? 0;
+                            $consultation_fee = $patient['consultation_fee'] ?? 0;
                         ?>
                         <div class="card dispensed">
                             <!-- Delete Button -->
@@ -2068,6 +1985,13 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                     <span class="info-label">Prescribed by:</span>
                                     <span class="info-value">Dr. <?php echo htmlspecialchars($patient['doctor_name']); ?></span>
                                 </div>
+                                
+                                <!-- Consultation Fee -->
+                                <div class="info-row">
+                                    <span class="info-label">Consultation Fee:</span>
+                                    <span class="info-value price-display">TSh <?php echo number_format($consultation_fee, 2); ?></span>
+                                </div>
+                                
                                 <?php if ($total_amount > 0): ?>
                                 <div class="info-row">
                                     <span class="info-label">Medicine Amount:</span>
@@ -2091,65 +2015,62 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                             
                             <?php if (!empty($patient['diagnosis'])): ?>
                             <div class="card-description">
-                                <strong>Doctor's Diagnosis:</strong><br>
+                                <strong><i class="fas fa-stethoscope"></i> Doctor's Diagnosis:</strong><br>
                                 <?php echo htmlspecialchars($patient['diagnosis']); ?>
                             </div>
                             <?php endif; ?>
                             
+                            <?php if (!empty($patient['symptoms'])): ?>
+                            <div class="card-description">
+                                <strong><i class="fas fa-notes-medical"></i> Reported Symptoms:</strong><br>
+                                <?php echo htmlspecialchars($patient['symptoms']); ?>
+                            </div>
+                            <?php endif; ?>
+                            
                             <!-- Laboratory Results Section -->
-                            <?php if (!empty($patient['lab_results'])): ?>
+                            <?php if (!empty($patient['lab_tests'])): ?>
                             <div class="lab-results-section">
                                 <h5><i class="fas fa-vial"></i> Laboratory Test Results</h5>
-                                <?php 
-                                $lab_tests = explode(';;', $patient['lab_results']);
-                                foreach ($lab_tests as $test):
-                                    $test_data = explode('|', $test);
-                                    if (count($test_data) >= 3):
-                                        $test_type = trim($test_data[0]);
-                                        $test_result = trim($test_data[1]);
-                                        $lab_test_id = trim($test_data[2]);
-                                ?>
+                                <?php foreach ($patient['lab_tests'] as $lab_test): ?>
                                 <div class="lab-test-item">
                                     <div class="test-details">
-                                        <div class="test-type"><?php echo htmlspecialchars($test_type); ?></div>
-                                        <div class="test-results"><?php echo htmlspecialchars($test_result); ?></div>
+                                        <div class="test-type"><?php echo htmlspecialchars($lab_test['test_type']); ?></div>
+                                        <div class="test-results"><?php echo htmlspecialchars($lab_test['results']); ?></div>
                                     </div>
                                     <div class="test-actions">
                                         <span style="color: #3b82f6; font-weight: bold; font-size: 0.9rem;">
                                             <i class="fas fa-check-circle"></i> Completed
                                         </span>
+                                        <?php if ($lab_test['lab_price'] > 0): ?>
+                                        <div style="color: #059669; font-weight: bold;">
+                                            Price: TSh <?php echo number_format($lab_test['lab_price'], 2); ?>
+                                        </div>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
-                                <?php 
-                                    endif;
-                                endforeach; 
-                                ?>
+                                <?php endforeach; ?>
                             </div>
                             <?php endif; ?>
                             
                             <div class="medications-list">
                                 <strong style="display: block; margin-bottom: 15px; color: #1e293b; font-size: 1rem;">Dispensed Medications:</strong>
-                                <?php 
-                                $prescriptions = explode(';;', $patient['prescriptions_data']);
-                                foreach ($prescriptions as $prescription):
-                                    $med_data = explode('|', $prescription);
-                                    if (count($med_data) >= 6):
-                                        $med_name = $med_data[0];
-                                        $dosage = $med_data[1];
-                                        $frequency = $med_data[2];
-                                        $duration = $med_data[3];
-                                        $instructions = $med_data[4];
-                                        $prescription_id = $med_data[5];
-                                ?>
+                                <?php foreach ($patient['prescriptions'] as $prescription): ?>
                                 <div class="medication-item">
                                     <div class="medication-details">
-                                        <div class="medication-name"><?php echo htmlspecialchars($med_name); ?></div>
+                                        <?php if (!empty($prescription['alternative_medicine'])): ?>
+                                        <div class="medication-name" style="color: #f59e0b;">
+                                            <i class="fas fa-exchange-alt"></i> Alternative: <?php echo htmlspecialchars($prescription['alternative_medicine']); ?>
+                                            <br><small style="color: #64748b;">Original: <?php echo htmlspecialchars($prescription['medicine_name']); ?></small>
+                                        </div>
+                                        <?php else: ?>
+                                        <div class="medication-name"><?php echo htmlspecialchars($prescription['medicine_name']); ?></div>
+                                        <?php endif; ?>
                                         <div class="medication-specs">
-                                            <strong>Dosage:</strong> <?php echo htmlspecialchars($dosage); ?> | 
-                                            <strong>Frequency:</strong> <?php echo htmlspecialchars($frequency); ?> | 
-                                            <strong>Duration:</strong> <?php echo htmlspecialchars($duration); ?>
-                                            <?php if (!empty($instructions)): ?>
-                                            | <strong>Instructions:</strong> <?php echo htmlspecialchars($instructions); ?>
+                                            <strong>Dosage:</strong> <?php echo htmlspecialchars($prescription['dosage']); ?> | 
+                                            <strong>Frequency:</strong> <?php echo htmlspecialchars($prescription['frequency']); ?> | 
+                                            <strong>Duration:</strong> <?php echo htmlspecialchars($prescription['duration']); ?>
+                                            <?php if (!empty($prescription['instructions'])): ?>
+                                            | <strong>Instructions:</strong> <?php echo htmlspecialchars($prescription['instructions']); ?>
                                             <?php endif; ?>
                                         </div>
                                     </div>
@@ -2157,12 +2078,14 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                         <span style="color: #059669; font-weight: bold; font-size: 0.9rem;">
                                             <i class="fas fa-check-circle"></i> Dispensed
                                         </span>
+                                        <?php if ($prescription['medicine_price'] > 0): ?>
+                                        <div style="color: #059669; font-weight: bold;">
+                                            Price: TSh <?php echo number_format($prescription['medicine_price'], 2); ?>
+                                        </div>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
-                                <?php 
-                                    endif;
-                                endforeach; 
-                                ?>
+                                <?php endforeach; ?>
                                 
                                 <!-- Edit Total Price Form (Hidden by default) -->
                                 <div id="edit_price_form_<?php echo $patient['patient_id']; ?>" class="edit-price-form" style="display: none;">
@@ -2212,113 +2135,8 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             <!-- Payments Management Tab -->
             <div id="payments-tab" class="tab-content">
                 <h3 style="color: #1e293b; margin-bottom: 20px;">
-                    <i class="fas fa-money-bill-wave"></i> Payments Management - Complete CRUD Operations
+                    <i class="fas fa-money-bill-wave"></i> Payments Management
                 </h3>
-                
-                <!-- Add New Payment Form -->
-                <div class="payments-management">
-                    <h4 style="margin-bottom: 15px; color: #1e293b;">
-                        <i class="fas fa-plus-circle"></i> 
-                        <?php echo $editing_payment ? 'Edit Payment Record' : 'Add New Payment Record'; ?>
-                    </h4>
-                    <form method="POST" action="">
-                        <?php if ($editing_payment): ?>
-                            <input type="hidden" name="payment_id" value="<?php echo $editing_payment['id']; ?>">
-                        <?php endif; ?>
-                        
-                        <div class="payment-form-grid">
-                            <div class="form-group">
-                                <label class="form-label">Patient *</label>
-                                <select name="patient_id" class="form-select" required <?php echo $editing_payment ? 'disabled' : ''; ?>>
-                                    <option value="">Select Patient</option>
-                                    <?php foreach ($patients as $patient): ?>
-                                    <option value="<?php echo $patient['id']; ?>" 
-                                        <?php echo ($editing_payment && $editing_payment['patient_id'] == $patient['id']) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($patient['full_name']) . ' (' . htmlspecialchars($patient['card_no']) . ')'; ?>
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <?php if ($editing_payment): ?>
-                                    <input type="hidden" name="patient_id" value="<?php echo $editing_payment['patient_id']; ?>">
-                                <?php endif; ?>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Payment Type *</label>
-                                <select name="payment_type" class="form-select" required>
-                                    <option value="medicine_and_lab" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'medicine_and_lab') ? 'selected' : ''; ?>>Medicine & Laboratory</option>
-                                    <option value="medicine" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'medicine') ? 'selected' : ''; ?>>Medicine Only</option>
-                                    <option value="lab" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'lab') ? 'selected' : ''; ?>>Laboratory Only</option>
-                                    <option value="cash" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'cash') ? 'selected' : ''; ?>>Cash Payment</option>
-                                    <option value="card" <?php echo ($editing_payment && $editing_payment['payment_type'] == 'card') ? 'selected' : ''; ?>>Card Payment</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Medicine Amount (TSh)</label>
-                                <input type="number" name="medicine_amount" class="form-input" min="0" step="0.01" 
-                                    value="<?php echo $editing_payment ? $editing_payment['medicine_amount'] : '0'; ?>" required>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Laboratory Amount (TSh)</label>
-                                <input type="number" name="lab_amount" class="form-input" min="0" step="0.01" 
-                                    value="<?php echo $editing_payment ? $editing_payment['lab_amount'] : '0'; ?>" required>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Status *</label>
-                                <select name="status" class="form-select" required>
-                                    <option value="pending" <?php echo ($editing_payment && $editing_payment['status'] == 'pending') ? 'selected' : ''; ?>>Pending</option>
-                                    <option value="paid" <?php echo ($editing_payment && $editing_payment['status'] == 'paid') ? 'selected' : ''; ?>>Paid</option>
-                                    <option value="cancelled" <?php echo ($editing_payment && $editing_payment['status'] == 'cancelled') ? 'selected' : ''; ?>>Cancelled</option>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Notes</label>
-                                <textarea name="notes" class="form-textarea" placeholder="Additional notes..."><?php echo $editing_payment ? htmlspecialchars($editing_payment['notes']) : ''; ?></textarea>
-                            </div>
-                        </div>
-                        
-                        <!-- Amount Summary -->
-                        <div class="payment-amounts">
-                            <div class="amount-display">
-                                <div class="amount-label">Medicine Total</div>
-                                <div class="amount-value" id="medicineTotalDisplay">
-                                    TSh <?php echo $editing_payment ? number_format($editing_payment['medicine_amount'], 2) : '0.00'; ?>
-                                </div>
-                            </div>
-                            <div class="amount-display">
-                                <div class="amount-label">Lab Total</div>
-                                <div class="amount-value" id="labTotalDisplay">
-                                    TSh <?php echo $editing_payment ? number_format($editing_payment['lab_amount'], 2) : '0.00'; ?>
-                                </div>
-                            </div>
-                            <div class="amount-display" style="grid-column: span 2; background: #d1fae5;">
-                                <div class="amount-label">Grand Total</div>
-                                <div class="amount-value" id="grandTotalDisplay" style="color: #065f46; font-size: 1.3rem;">
-                                    TSh <?php echo $editing_payment ? number_format($editing_payment['amount'], 2) : '0.00'; ?>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="payment-actions">
-                            <?php if ($editing_payment): ?>
-                                <button type="submit" name="update_payment" class="btn btn-warning">
-                                    <i class="fas fa-save"></i> Update Payment Record
-                                </button>
-                                <a href="?" class="btn btn-secondary">
-                                    <i class="fas fa-times"></i> Cancel Edit
-                                </a>
-                            <?php else: ?>
-                                <button type="submit" name="add_payment" class="btn btn-success">
-                                    <i class="fas fa-save"></i> Add Payment Record
-                                </button>
-                            <?php endif; ?>
-                        </div>
-                    </form>
-                </div>
                 
                 <!-- Payments List -->
                 <div class="table-card">
@@ -2331,12 +2149,12 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                     <th>Patient</th>
                                     <th>Medicine Amount</th>
                                     <th>Lab Amount</th>
+                                    <th>Consultation Fee</th>
                                     <th>Total Amount</th>
                                     <th>Type</th>
                                     <th>Status</th>
                                     <th>Date</th>
                                     <th>Processed By</th>
-                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2349,6 +2167,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                     </td>
                                     <td>TSh <?php echo number_format($payment['medicine_amount'], 2); ?></td>
                                     <td>TSh <?php echo number_format($payment['lab_amount'], 2); ?></td>
+                                    <td>TSh <?php echo number_format($payment['consultation_fee'], 2); ?></td>
                                     <td><strong>TSh <?php echo number_format($payment['amount'], 2); ?></strong></td>
                                     <td>
                                         <span class="badge badge-info">
@@ -2363,19 +2182,6 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                     <td><?php echo date('M j, Y H:i', strtotime($payment['created_at'])); ?></td>
                                     <td>
                                         <small>User #<?php echo $payment['processed_by']; ?></small>
-                                    </td>
-                                    <td>
-                                        <div class="action-buttons">
-                                            <a href="?edit_payment=<?php echo $payment['id']; ?>" class="btn btn-info btn-sm">
-                                                <i class="fas fa-edit"></i> Edit
-                                            </a>
-                                            <form method="POST" action="" style="display: inline;">
-                                                <input type="hidden" name="payment_id" value="<?php echo $payment['id']; ?>">
-                                                <button type="submit" name="delete_payment" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this payment record?')">
-                                                    <i class="fas fa-trash"></i> Delete
-                                                </button>
-                                            </form>
-                                        </div>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -2419,12 +2225,10 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                             
                             <div class="tests-summary">
                                 <strong>Laboratory Tests Summary:</strong>
-                                <?php 
-                                $tests = explode(' | ', $patient['all_tests']);
-                                foreach ($tests as $test): 
-                                ?>
+                                <?php foreach ($patient['lab_details'] as $test): ?>
                                     <div class="test-item">
-                                        <?php echo htmlspecialchars($test); ?>
+                                        <strong><?php echo htmlspecialchars($test['test_type']); ?>:</strong> 
+                                        <?php echo htmlspecialchars($test['results']); ?>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
@@ -2457,8 +2261,8 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                         <th>Age</th>
                                         <th>Gender</th>
                                         <th>Phone</th>
+                                        <th>Consultation Fee</th>
                                         <th>Prescriptions</th>
-                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -2474,14 +2278,10 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                                         </td>
                                         <td><?php echo $patient['phone'] ?: 'N/A'; ?></td>
                                         <td>
-                                            <span class="badge badge-primary"><?php echo $patient['prescription_count']; ?></span>
+                                            <strong>TSh <?php echo number_format($patient['consultation_fee'], 2); ?></strong>
                                         </td>
                                         <td>
-                                            <div class="action-buttons">
-                                                <button class="btn btn-info btn-sm" onclick="viewPatientDetails(<?php echo $patient['id']; ?>)">
-                                                    <i class="fas fa-eye"></i> View
-                                                </button>
-                                            </div>
+                                            <span class="badge badge-primary"><?php echo $patient['prescription_count']; ?></span>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -2594,26 +2394,6 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 },
                 order: [[0, 'desc']] // Sort by ID descending
             });
-
-            // Auto-update payment amounts when inputs change
-            $('input[name="medicine_amount"], input[name="lab_amount"]').on('input', function() {
-                updatePaymentTotals();
-            });
-
-            // Initialize payment totals
-            updatePaymentTotals();
-
-            // Handle form submissions to prevent page reload
-            $('form').on('submit', function(e) {
-                // Store current scroll position
-                sessionStorage.setItem('scrollPosition', window.pageYOffset || document.documentElement.scrollTop);
-                
-                // Store current active tab
-                const activeTab = document.querySelector('.tab.active');
-                if (activeTab) {
-                    sessionStorage.setItem('activeTab', activeTab.textContent.trim());
-                }
-            });
         });
 
         // Function to show tabs
@@ -2633,12 +2413,21 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             
             // Add active class to clicked tab
             event.target.classList.add('active');
-            
-            // Store active tab
-            sessionStorage.setItem('activeTab', event.target.textContent.trim());
         }
 
-        // Function to update total amount for a patient (INCLUDING LAB TESTS)
+        // Function to toggle alternative medicine input
+        function toggleAlternativeMedicine(prescriptionId) {
+            const availableRadio = document.querySelector('input[name="prescriptions[' + prescriptionId + '][available]"][value="no"]');
+            const alternativeDiv = document.getElementById('alternative_' + prescriptionId);
+            
+            if (availableRadio.checked) {
+                alternativeDiv.style.display = 'block';
+            } else {
+                alternativeDiv.style.display = 'none';
+            }
+        }
+
+        // Function to update total amount for a patient (INCLUDING LAB TESTS AND CONSULTATION FEE)
         function updateTotalAmount(patientId) {
             const form = document.getElementById('dispenseForm_' + patientId);
             let medicineTotal = 0;
@@ -2661,10 +2450,21 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
                 labTotal += parseFloat(input.value) || 0;
             });
             
-            const totalAmount = medicineTotal + labTotal;
+            // Get consultation fee from the display element
+            const consultationFeeElement = form.closest('.card').querySelector('.consultation-fee-value');
+            let consultationFee = 0;
+            if (consultationFeeElement) {
+                consultationFee = parseFloat(consultationFeeElement.textContent.replace('TSh', '').replace(',', '')) || 0;
+            }
+            
+            const totalAmount = medicineTotal + labTotal + consultationFee;
             const totalAmountElement = document.getElementById('totalAmount_' + patientId);
             totalAmountElement.innerHTML = `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: center;">
+                    <div>
+                        <small>Consultation Fee</small><br>
+                        <strong>TSh ${consultationFee.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>
+                    </div>
                     <div>
                         <small>Medicine Total</small><br>
                         <strong>TSh ${medicineTotal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>
@@ -2680,28 +2480,6 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             `;
         }
 
-        // Function to update payment totals in the form
-        function updatePaymentTotals() {
-            const medicineAmount = parseFloat($('input[name="medicine_amount"]').val()) || 0;
-            const labAmount = parseFloat($('input[name="lab_amount"]').val()) || 0;
-            const totalAmount = medicineAmount + labAmount;
-            
-            $('#medicineTotalDisplay').text('TSh ' + medicineAmount.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            }));
-            
-            $('#labTotalDisplay').text('TSh ' + labAmount.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            }));
-            
-            $('#grandTotalDisplay').text('TSh ' + totalAmount.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            }));
-        }
-
         // Function to toggle edit price form
         function toggleEditPriceForm(patientId) {
             const form = document.getElementById('edit_price_form_' + patientId);
@@ -2715,12 +2493,6 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
         // Function to print all prescriptions for a patient
         function printAllPrescriptions(patientId) {
             window.open('print_patient_prescriptions.php?patient_id=' + patientId, '_blank');
-        }
-
-        // Function to view patient details
-        function viewPatientDetails(patientId) {
-            alert('Viewing patient details: ' + patientId);
-            // You can implement a modal or redirect to patient details page
         }
 
         // Auto-remove alerts after 5 seconds
@@ -2751,33 +2523,7 @@ $current_phone = htmlspecialchars($current_user['phone'] ?? '');
             <?php foreach ($pending_patients as $patient): ?>
             updateTotalAmount(<?php echo $patient['patient_id']; ?>);
             <?php endforeach; ?>
-
-            // Restore scroll position
-            const scrollPosition = sessionStorage.getItem('scrollPosition');
-            if (scrollPosition) {
-                window.scrollTo(0, parseInt(scrollPosition));
-                sessionStorage.removeItem('scrollPosition');
-            }
-
-            // Restore active tab
-            const activeTab = sessionStorage.getItem('activeTab');
-            if (activeTab) {
-                const tabs = document.querySelectorAll('.tab');
-                tabs.forEach(tab => {
-                    if (tab.textContent.trim() === activeTab) {
-                        tab.click();
-                    }
-                });
-                sessionStorage.removeItem('activeTab');
-            }
         });
-
-        // If editing payment, scroll to payments tab
-        <?php if ($editing_payment): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            showTab('payments');
-        });
-        <?php endif; ?>
     </script>
 </body>
 </html>
