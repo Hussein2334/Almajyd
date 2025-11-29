@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Nov 27, 2025 at 11:43 PM
+-- Generation Time: Nov 29, 2025 at 04:47 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -72,13 +72,6 @@ CREATE TABLE `checking_forms` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
---
--- Dumping data for table `checking_forms`
---
-
-INSERT INTO `checking_forms` (`id`, `patient_id`, `doctor_id`, `symptoms`, `diagnosis`, `notes`, `status`, `created_at`, `updated_at`) VALUES
-(3, 3, 3, 'anaumwa na tumbo', 'kala kwa shangazi ', 'asile sana ', 'completed', '2025-11-27 19:32:00', '2025-11-27 19:32:00');
-
 -- --------------------------------------------------------
 
 --
@@ -113,13 +106,6 @@ CREATE TABLE `laboratory_tests` (
   `lab_price` decimal(10,2) DEFAULT 0.00
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
---
--- Dumping data for table `laboratory_tests`
---
-
-INSERT INTO `laboratory_tests` (`id`, `checking_form_id`, `test_type`, `results`, `status`, `created_at`, `updated_at`, `test_description`, `conducted_by`, `lab_price`) VALUES
-(3, 3, 'Blood Pressure', 'hamna ', 'completed', '2025-11-27 19:32:44', '2025-11-27 19:33:18', 'mpime hii ', NULL, 0.00);
-
 -- --------------------------------------------------------
 
 --
@@ -141,13 +127,6 @@ CREATE TABLE `patients` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   `patient_type` enum('standard','child','senior','emergency','follow_up') DEFAULT 'standard'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
---
--- Dumping data for table `patients`
---
-
-INSERT INTO `patients` (`id`, `card_no`, `full_name`, `age`, `gender`, `weight`, `phone`, `address`, `consultation_fee`, `created_by`, `created_at`, `updated_at`, `patient_type`) VALUES
-(3, 'PT2025-00011', 'HUSSEIN ABDULRAHMAN', 23, 'male', 23.00, '0658216348', 'Ushirika', 10000.00, 2, '2025-11-27 19:30:37', '2025-11-27 19:30:37', 'standard');
 
 -- --------------------------------------------------------
 
@@ -191,18 +170,6 @@ CREATE TABLE `prescriptions` (
   `medicine_price` decimal(10,2) DEFAULT 0.00,
   `is_available` enum('yes','no') DEFAULT 'yes'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
---
--- Dumping data for table `prescriptions`
---
-
-INSERT INTO `prescriptions` (`id`, `checking_form_id`, `medicine_name`, `dosage`, `quantity`, `instructions`, `status`, `created_at`, `updated_at`, `frequency`, `duration`, `alternative_medicine`, `medicine_price`, `is_available`) VALUES
-(2, 3, 'dawa ya kichwa ', '500mg', 0, 'mpime hii ', 'prescribed', '2025-11-27 19:37:43', '2025-11-27 19:37:43', 'three per day', '7 days', NULL, 0.00, 'yes'),
-(3, 3, 'PANADOL', '300%', 0, 'tumia kwa wakati', '', '2025-11-27 20:20:52', '2025-11-27 20:20:52', 'k;lk/l', '5', NULL, 0.00, 'yes'),
-(4, 3, 'PANADOL', '300%', 0, 'tumia kwa wakati', '', '2025-11-27 20:26:22', '2025-11-27 20:26:22', 'k;lk/l', '5', NULL, 0.00, 'yes'),
-(5, 3, 'PANADOL', '300%', 0, 'tumia kwa wakati', '', '2025-11-27 20:27:30', '2025-11-27 20:27:30', 'k;lk/l', '5', NULL, 0.00, 'yes'),
-(6, 3, 'PANADOL', '300%', 0, 'tumia kwa wakati', '', '2025-11-27 20:28:04', '2025-11-27 20:28:04', 'k;lk/l', '5', NULL, 0.00, 'yes'),
-(7, 3, 'dawa ya kichwa ', '500mg', 0, 'csd bn', 'prescribed', '2025-11-27 21:51:46', '2025-11-27 21:51:46', 'bdba', '7 days', NULL, 0.00, 'yes');
 
 -- --------------------------------------------------------
 
@@ -319,7 +286,7 @@ INSERT INTO `users` (`id`, `username`, `password`, `email`, `role`, `full_name`,
 (2, 'receptionist', '$2y$10$rd9zt5qIOLCCYijvWPsrMO6PwfkDgEqZHyoNTFrI7AfUixhd2m7NK', 'rec@gmail.com', 'receptionist', 'RECEPTIONIST', '+255658216348', 'Tomondo', 'Zanzibar', 'active', '2025-11-27 17:01:44', '2025-11-27 17:01:44'),
 (3, 'doctor', '$2y$10$f9LDa4rRmUqFn3t8N2Wd1.EsRnOpN1OTYe1GXYYH6NvqA9VThJeve', 'd@gmail.com', 'doctor', 'HUSSEIN ABDULRAHMAN', '+255658216348', 'Tomondo', 'Zanzibar', 'active', '2025-11-27 17:37:25', '2025-11-27 17:37:25'),
 (4, 'labolatory', '$2y$10$Asc7wWPyej34m5hZV9SBceR/B7hN3XQsocFJZLMaMoyB3z2yuXL1a', 'lab@gmail.com', 'laboratory', 'HUSSEIN ABDULRAHMAN', '+255658216348', 'Tomondo', 'Zanzibar', 'active', '2025-11-27 18:47:01', '2025-11-27 18:47:01'),
-(5, 'phamarcy', '$2y$10$K4y6wWhhFitXwfmQDI8PTO7rHxpPlsgkBvpgbTgFGY1mtb59LRkuS', 'phamarcy@gmail.com', 'pharmacy', 'HUSSEIN ABDULRAHMAN', '+255658216348', 'Tomondo', 'Zanzibar', 'active', '2025-11-27 19:35:12', '2025-11-27 19:35:12');
+(5, 'phamarcy', '$2y$10$K4y6wWhhFitXwfmQDI8PTO7rHxpPlsgkBvpgbTgFGY1mtb59LRkuS', 'phamarcy@gmail.com', 'pharmacy', 'PHAMARCY ', '+255658216348', 'Tomondo', 'Zanzibar', 'active', '2025-11-27 19:35:12', '2025-11-29 14:27:21');
 
 --
 -- Indexes for dumped tables
@@ -448,7 +415,7 @@ ALTER TABLE `audit_logs`
 -- AUTO_INCREMENT for table `checking_forms`
 --
 ALTER TABLE `checking_forms`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT for table `insurance`
@@ -460,13 +427,13 @@ ALTER TABLE `insurance`
 -- AUTO_INCREMENT for table `laboratory_tests`
 --
 ALTER TABLE `laboratory_tests`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
 
 --
 -- AUTO_INCREMENT for table `patients`
 --
 ALTER TABLE `patients`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=6;
 
 --
 -- AUTO_INCREMENT for table `payments`
@@ -478,7 +445,7 @@ ALTER TABLE `payments`
 -- AUTO_INCREMENT for table `prescriptions`
 --
 ALTER TABLE `prescriptions`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=8;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT for table `receipts`
