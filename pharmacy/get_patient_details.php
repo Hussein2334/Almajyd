@@ -53,6 +53,10 @@ try {
     $priced_items = 0;
     $total_items = count($prescriptions) + count($lab_tests);
     
+    // Add consultation fee to total
+    $consultation_fee = $patient['consultation_fee'] ?? 0;
+    $total_cost += $consultation_fee;
+    
     foreach ($prescriptions as $prescription) {
         if ($prescription['medicine_price'] > 0) {
             $total_cost += $prescription['medicine_price'];
@@ -105,6 +109,12 @@ try {
                 <span class="detail-label">Phone</span>
                 <span class="detail-value"><?php echo htmlspecialchars($patient['phone'] ?? 'N/A'); ?></span>
             </div>
+            <div class="detail-item">
+                <span class="detail-label">Consultation Fee</span>
+                <span class="detail-value" style="color: #059669; font-weight: bold;">
+                    TZS <?php echo number_format($patient['consultation_fee'] ?? 0, 2); ?>
+                </span>
+            </div>
         </div>
         
         <div class="info-card">
@@ -118,8 +128,14 @@ try {
                 <span class="detail-value"><?php echo count($lab_tests); ?></span>
             </div>
             <div class="detail-item">
+                <span class="detail-label">Consultation Fee</span>
+                <span class="detail-value">TZS <?php echo number_format($patient['consultation_fee'] ?? 0, 2); ?></span>
+            </div>
+            <div class="detail-item">
                 <span class="detail-label">Total Cost</span>
-                <span class="detail-value">TZS <?php echo number_format($total_cost, 2); ?></span>
+                <span class="detail-value" style="color: #dc2626; font-weight: bold;">
+                    TZS <?php echo number_format($total_cost, 2); ?>
+                </span>
             </div>
             <div class="detail-item">
                 <span class="detail-label">Pricing Status</span>
@@ -155,6 +171,9 @@ try {
                 <strong>Total Items:</strong> <?php echo $total_items; ?> (<?php echo $priced_items; ?> priced)
             </div>
             <div>
+                <strong>Consultation Fee:</strong> TZS <?php echo number_format($patient['consultation_fee'] ?? 0, 2); ?>
+            </div>
+            <div>
                 <strong>Current Total:</strong> TZS <?php echo number_format($total_cost, 2); ?>
             </div>
         </div>
@@ -167,7 +186,7 @@ try {
                     <i class="fas fa-print"></i> Print All Items
                 </h4>
                 <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 15px;">
-                    Print all prescriptions and lab tests including items without prices.
+                    Print all prescriptions and lab tests including consultation fee and items without prices.
                 </p>
                 <a href="print_patient_prescriptions.php?patient_id=<?php echo $patient_id; ?>&type=all" 
                    class="btn btn-primary" 
@@ -183,14 +202,14 @@ try {
                     <i class="fas fa-file-invoice-dollar"></i> Print Priced Items
                 </h4>
                 <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 15px;">
-                    Print only items that have prices set. Total: TZS <?php echo number_format($total_cost, 2); ?>
+                    Print only items that have prices set including consultation fee. Total: TZS <?php echo number_format($total_cost, 2); ?>
                 </p>
-                <?php if ($priced_items > 0): ?>
+                <?php if ($priced_items > 0 || $consultation_fee > 0): ?>
                     <a href="print_patient_prescriptions.php?patient_id=<?php echo $patient_id; ?>&type=priced" 
                        class="btn btn-success" 
                        style="width: 100%; text-decoration: none; display: inline-flex; justify-content: center; align-items: center; gap: 8px;"
                        target="_blank">
-                        <i class="fas fa-receipt"></i> Print Priced (<?php echo $priced_items; ?>)
+                        <i class="fas fa-receipt"></i> Print Priced (<?php echo $priced_items + ($consultation_fee > 0 ? 1 : 0); ?>)
                     </a>
                 <?php else: ?>
                     <button class="btn btn-secondary" style="width: 100%;" disabled>
@@ -205,7 +224,7 @@ try {
                     <i class="fas fa-file-alt"></i> Print Summary
                 </h4>
                 <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 15px;">
-                    Print a simple summary with totals and item counts.
+                    Print a simple summary with totals, consultation fee and item counts.
                 </p>
                 <a href="print_patient_prescriptions.php?patient_id=<?php echo $patient_id; ?>&type=summary" 
                    class="btn btn-info" 
@@ -224,13 +243,16 @@ try {
             </div>
             <div style="color: #92400e; font-size: 0.9rem;">
                 <p style="margin: 5px 0;">
-                    • <strong>All Items:</strong> Includes everything, even items without prices
+                    • <strong>All Items:</strong> Includes everything + consultation fee (TZS <?php echo number_format($patient['consultation_fee'] ?? 0, 2); ?>)
                 </p>
                 <p style="margin: 5px 0;">
-                    • <strong>Priced Items:</strong> Only items with prices set (<?php echo $priced_items; ?> available)
+                    • <strong>Priced Items:</strong> Only items with prices set + consultation fee (<?php echo $priced_items + ($consultation_fee > 0 ? 1 : 0); ?> available)
                 </p>
                 <p style="margin: 5px 0;">
-                    • <strong>Summary:</strong> Brief overview with totals and counts
+                    • <strong>Summary:</strong> Brief overview with totals, consultation fee and counts
+                </p>
+                <p style="margin: 5px 0; font-weight: bold;">
+                    • <strong>Consultation Fee:</strong> TZS <?php echo number_format($patient['consultation_fee'] ?? 0, 2); ?> (included in all prints)
                 </p>
             </div>
         </div>
@@ -327,5 +349,32 @@ try {
 .btn:disabled:hover {
     background: #9ca3af;
     transform: none;
+}
+
+.badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.badge-success {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.badge-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.badge-danger {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.badge-info {
+    background: #dbeafe;
+    color: #1e40af;
 }
 </style>

@@ -1,4 +1,8 @@
 <?php
+// Turn off error reporting for production
+error_reporting(0);
+ini_set('display_errors', 0);
+
 require_once '../config.php';
 
 // Check if session is not already started
@@ -39,12 +43,52 @@ if (isset($_POST['ajax_request'])) {
             $response['message'] = "New prescription added successfully!";
         }
         
+        // Add External Patient Prescription
+        elseif ($_POST['action'] == 'add_external_prescription') {
+            $patient_name = $_POST['patient_name'];
+            $patient_phone = $_POST['patient_phone'];
+            $patient_age = $_POST['patient_age'];
+            $patient_gender = $_POST['patient_gender'];
+            $medicine_name = $_POST['medicine_name'];
+            $dosage = $_POST['dosage'];
+            $frequency = $_POST['frequency'];
+            $duration = $_POST['duration'];
+            $instructions = $_POST['instructions'];
+            $medicine_price = $_POST['medicine_price'];
+            
+            // Generate card number for external patient
+            $card_no = 'EXT-' . date('YmdHis');
+            
+            // Create external patient
+            $patient_stmt = $pdo->prepare("INSERT INTO patients (card_no, full_name, age, gender, phone, patient_type, created_by) VALUES (?, ?, ?, ?, ?, 'external', ?)");
+            $patient_stmt->execute([$card_no, $patient_name, $patient_age, $patient_gender, $patient_phone, $_SESSION['user_id']]);
+            $patient_id = $pdo->lastInsertId();
+            
+            // Create checking form for external patient
+            $checking_stmt = $pdo->prepare("INSERT INTO checking_forms (patient_id, doctor_id, symptoms, diagnosis, status) VALUES (?, ?, 'External patient - Pharmacy direct', 'External prescription', 'completed')");
+            $checking_stmt->execute([$patient_id, $_SESSION['user_id']]);
+            $checking_form_id = $pdo->lastInsertId();
+            
+            // Add prescription
+            $prescription_stmt = $pdo->prepare("INSERT INTO prescriptions (checking_form_id, medicine_name, dosage, frequency, duration, instructions, medicine_price, status, is_available) VALUES (?, ?, ?, ?, ?, ?, ?, 'dispensed', 'yes')");
+            $prescription_stmt->execute([$checking_form_id, $medicine_name, $dosage, $frequency, $duration, $instructions, $medicine_price]);
+            
+            $response['success'] = true;
+            $response['message'] = "External patient prescription added successfully! Card No: " . $card_no;
+            $response['card_no'] = $card_no;
+        }
+        
         // Update Medicine
         elseif ($_POST['action'] == 'update_medicine') {
             $prescription_id = $_POST['prescription_id'];
             $medicine_price = $_POST['medicine_price'];
             $is_available = $_POST['is_available'];
             $alternative_medicine = $_POST['alternative_medicine'];
+            
+            // If medicine is not available, set price to 0
+            if ($is_available == 'no') {
+                $medicine_price = 0;
+            }
             
             $stmt = $pdo->prepare("UPDATE prescriptions SET medicine_price = ?, is_available = ?, alternative_medicine = ? WHERE id = ?");
             $stmt->execute([$medicine_price, $is_available, $alternative_medicine, $prescription_id]);
@@ -77,6 +121,8 @@ if (isset($_POST['ajax_request'])) {
         }
         
     } catch (PDOException $e) {
+        $response['message'] = "Database error: " . $e->getMessage();
+    } catch (Exception $e) {
         $response['message'] = "Error: " . $e->getMessage();
     }
     
@@ -131,7 +177,7 @@ if (isset($_POST['update_profile'])) {
 
 // Get statistics for dashboard
 $total_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions")->fetch(PDO::FETCH_ASSOC)['total'];
-$today_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE DATE(created_at) = CURDATE()")->fetch(PDO::FETCH_ASSOC)['total'];
+$today_prescriptions = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE DATE(created_at) = CURDATE()")->fetch(PDO::FETCH_ASSOC)['today_prescriptions'];
 $prescriptions_no_price = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE medicine_price = 0 OR medicine_price IS NULL")->fetch(PDO::FETCH_ASSOC)['total'];
 $lab_tests_no_price = $pdo->query("SELECT COUNT(*) as total FROM laboratory_tests WHERE lab_price = 0 OR lab_price IS NULL")->fetch(PDO::FETCH_ASSOC)['total'];
 $unavailable_medicines = $pdo->query("SELECT COUNT(*) as total FROM prescriptions WHERE is_available = 'no'")->fetch(PDO::FETCH_ASSOC)['total'];
@@ -197,7 +243,6 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
 $current_date = date('l, F j, Y');
 $current_time = date('h:i A');
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -713,7 +758,7 @@ $current_time = date('h:i A');
             font-size: 0.8rem;
         }
 
-        /* [STYLES ZINGINE ZA AWALI ZINABAKI ZILE ZILE...] */
+        /* Prescription Styles */
         .add-prescription-form {
             background: white;
             padding: 25px;
@@ -721,6 +766,40 @@ $current_time = date('h:i A');
             box-shadow: 0 4px 15px rgba(0,0,0,0.08);
             margin-bottom: 30px;
             border-left: 4px solid #10b981;
+        }
+        
+        .prescription-type-tabs {
+            display: flex;
+            border-bottom: 2px solid #e2e8f0;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .prescription-type-tab {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            font-weight: 600;
+            color: #64748b;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .prescription-type-tab.active {
+            color: #10b981;
+            border-bottom-color: #10b981;
+        }
+        
+        .prescription-type-content {
+            display: none;
+        }
+        
+        .prescription-type-content.active {
+            display: block;
         }
         
         .prescription-item {
@@ -830,6 +909,22 @@ $current_time = date('h:i A');
             box-shadow: 0 0 0 3px rgba(16,185,129,0.1);
         }
         
+        .form-input:disabled {
+            background-color: #f8fafc;
+            color: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .price-disabled {
+            background-color: #fef3c7 !important;
+            color: #92400e !important;
+            border-color: #f59e0b !important;
+        }
+        
+        .price-disabled::placeholder {
+            color: #d97706 !important;
+        }
+        
         .btn {
             padding: 10px 20px;
             border: none;
@@ -922,6 +1017,14 @@ $current_time = date('h:i A');
             }
             
             .print-info {
+                grid-template-columns: 1fr;
+            }
+            
+            .prescription-details {
+                grid-template-columns: 1fr;
+            }
+            
+            .form-row {
                 grid-template-columns: 1fr;
             }
         }
@@ -1049,59 +1152,152 @@ $current_time = date('h:i A');
                 <!-- Add New Prescription Form -->
                 <div class="add-prescription-form">
                     <h3><i class="fas fa-plus-circle"></i> Add New Prescription</h3>
-                    <form id="addPrescriptionForm">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Select Checking Form *</label>
-                                <select name="checking_form_id" class="form-select" required>
-                                    <option value="">Select Checking Form</option>
-                                    <?php foreach ($checking_forms as $form): ?>
-                                        <option value="<?php echo $form['id']; ?>">
-                                            <?php echo htmlspecialchars('CF-' . $form['id'] . ' - ' . $form['patient_name'] . ' (' . $form['card_no'] . ')'); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Medicine Name *</label>
-                                <input type="text" name="medicine_name" class="form-input" placeholder="Enter medicine name" required>
-                            </div>
-                        </div>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Dosage</label>
-                                <input type="text" name="dosage" class="form-input" placeholder="e.g., 500mg">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Frequency</label>
-                                <input type="text" name="frequency" class="form-input" placeholder="e.g., Twice daily">
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label">Duration</label>
-                                <input type="text" name="duration" class="form-input" placeholder="e.g., 7 days">
-                            </div>
-                        </div>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Medicine Price (TZS)</label>
-                                <input type="number" name="medicine_price" class="form-input" step="0.01" min="0" placeholder="Enter price">
-                            </div>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label class="form-label">Instructions</label>
-                            <textarea name="instructions" class="form-textarea" placeholder="Additional instructions for patient"></textarea>
-                        </div>
-                        
-                        <button type="submit" class="btn btn-primary" id="addPrescriptionBtn">
-                            <i class="fas fa-save"></i> Add Prescription
+                    
+                    <!-- Prescription Type Tabs -->
+                    <div class="prescription-type-tabs">
+                        <button type="button" class="prescription-type-tab active" onclick="showPrescriptionType('internal')">
+                            <i class="fas fa-hospital-user"></i> Internal Patient
                         </button>
-                    </form>
+                        <button type="button" class="prescription-type-tab" onclick="showPrescriptionType('external')">
+                            <i class="fas fa-user-plus"></i> External Patient
+                        </button>
+                    </div>
+                    
+                    <!-- Internal Patient Form -->
+                    <div id="internal-prescription" class="prescription-type-content active">
+                        <form id="addPrescriptionForm">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Select Checking Form *</label>
+                                    <select name="checking_form_id" class="form-select" required>
+                                        <option value="">Select Checking Form</option>
+                                        <?php foreach ($checking_forms as $form): ?>
+                                            <option value="<?php echo $form['id']; ?>">
+                                                <?php echo htmlspecialchars('CF-' . $form['id'] . ' - ' . $form['patient_name'] . ' (' . $form['card_no'] . ')'); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Medicine Name *</label>
+                                    <input type="text" name="medicine_name" class="form-input" placeholder="Enter medicine name" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Dosage</label>
+                                    <input type="text" name="dosage" class="form-input" placeholder="e.g., 500mg">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Frequency</label>
+                                    <input type="text" name="frequency" class="form-input" placeholder="e.g., Twice daily">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Duration</label>
+                                    <input type="text" name="duration" class="form-input" placeholder="e.g., 7 days">
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Medicine Price (TZS)</label>
+                                    <input type="number" name="medicine_price" class="form-input" step="0.01" min="0" placeholder="Enter price">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Instructions</label>
+                                <textarea name="instructions" class="form-textarea" placeholder="Additional instructions for patient"></textarea>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary" id="addPrescriptionBtn">
+                                <i class="fas fa-save"></i> Add Prescription
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- External Patient Form -->
+                    <div id="external-prescription" class="prescription-type-content">
+                        <form id="addExternalPrescriptionForm">
+                            <h4 style="color: #f59e0b; margin-bottom: 15px;">
+                                <i class="fas fa-user-plus"></i> External Patient Information
+                            </h4>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Patient Name *</label>
+                                    <input type="text" name="patient_name" class="form-input" placeholder="Enter patient full name" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Phone Number</label>
+                                    <input type="tel" name="patient_phone" class="form-input" placeholder="Enter phone number">
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Age</label>
+                                    <input type="number" name="patient_age" class="form-input" placeholder="Enter age">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Gender</label>
+                                    <select name="patient_gender" class="form-select">
+                                        <option value="">Select Gender</option>
+                                        <option value="male">Male</option>
+                                        <option value="female">Female</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <h4 style="color: #10b981; margin: 20px 0 15px 0;">
+                                <i class="fas fa-pills"></i> Medicine Information
+                            </h4>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Medicine Name *</label>
+                                    <input type="text" name="medicine_name" class="form-input" placeholder="Enter medicine name" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Dosage</label>
+                                    <input type="text" name="dosage" class="form-input" placeholder="e.g., 500mg">
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Frequency</label>
+                                    <input type="text" name="frequency" class="form-input" placeholder="e.g., Twice daily">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Duration</label>
+                                    <input type="text" name="duration" class="form-input" placeholder="e.g., 7 days">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label class="form-label">Medicine Price (TZS) *</label>
+                                    <input type="number" name="medicine_price" class="form-input" step="0.01" min="0" placeholder="Enter price" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label">Instructions</label>
+                                <textarea name="instructions" class="form-textarea" placeholder="Additional instructions for patient"></textarea>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-warning" id="addExternalPrescriptionBtn">
+                                <i class="fas fa-save"></i> Add External Patient Prescription
+                            </button>
+                        </form>
+                    </div>
                 </div>
                 
                 <?php if (empty($all_prescriptions)): ?>
@@ -1182,17 +1378,25 @@ $current_time = date('h:i A');
                                     <div class="form-row">
                                         <div class="form-group">
                                             <label class="form-label">Availability *</label>
-                                            <select name="is_available" class="form-select" required>
+                                            <select name="is_available" class="form-select" id="availability-<?php echo $prescription['id']; ?>" required onchange="togglePriceField(<?php echo $prescription['id']; ?>)">
                                                 <option value="yes" <?php echo $prescription['is_available'] == 'yes' ? 'selected' : ''; ?>>Available</option>
                                                 <option value="no" <?php echo $prescription['is_available'] == 'no' ? 'selected' : ''; ?>>Not Available</option>
                                             </select>
                                         </div>
                                         
                                         <div class="form-group">
-                                            <label class="form-label">Medicine Price (TZS) *</label>
+                                            <label class="form-label">Medicine Price (TZS)</label>
                                             <input type="number" name="medicine_price" class="form-input" 
+                                                   id="price-<?php echo $prescription['id']; ?>"
                                                    value="<?php echo $prescription['medicine_price']; ?>" 
-                                                   step="0.01" min="0" placeholder="Enter price" required>
+                                                   step="0.01" min="0" placeholder="Enter price"
+                                                   <?php echo $prescription['is_available'] == 'no' ? 'disabled' : ''; ?>
+                                                   <?php echo $prescription['is_available'] == 'no' ? 'class="form-input price-disabled"' : 'class="form-input"'; ?>>
+                                            <?php if ($prescription['is_available'] == 'no'): ?>
+                                                <small style="color: #92400e; font-size: 0.8rem; margin-top: 5px; display: block;">
+                                                    <i class="fas fa-info-circle"></i> Price cannot be set when medicine is not available
+                                                </small>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
                                     
@@ -1228,16 +1432,16 @@ $current_time = date('h:i A');
                 <?php else: ?>
                     <div class="lab-results-container">
                         <?php foreach ($lab_results as $result): ?>
-                        <div class="result-card">
-                            <div class="result-header">
-                                <div class="result-title">
+                        <div class="prescription-item">
+                            <div class="prescription-header">
+                                <div class="prescription-title">
                                     <i class="fas fa-microscope"></i>
                                     <?php echo htmlspecialchars($result['test_type']); ?>
                                 </div>
-                                <div class="result-status">Completed</div>
+                                <div class="badge badge-success">Completed</div>
                             </div>
                             
-                            <div class="result-details">
+                            <div class="prescription-details">
                                 <div class="detail-item">
                                     <span class="detail-label">Patient</span>
                                     <span class="detail-value"><?php echo htmlspecialchars($result['patient_name']); ?></span>
@@ -1273,7 +1477,7 @@ $current_time = date('h:i A');
                             <?php endif; ?>
                             
                             <!-- Lab Test Price Form -->
-                            <div class="lab-price-form">
+                            <div class="medicine-form">
                                 <h4 style="margin-bottom: 15px; color: #374151;">
                                     <i class="fas fa-money-bill-wave"></i> Set Laboratory Test Price
                                 </h4>
@@ -1435,6 +1639,43 @@ $current_time = date('h:i A');
             document.body.classList.remove('page-loading');
         }
 
+        // Function to toggle price field based on availability
+        function togglePriceField(prescriptionId) {
+            const availabilitySelect = document.getElementById(`availability-${prescriptionId}`);
+            const priceInput = document.getElementById(`price-${prescriptionId}`);
+            const isAvailable = availabilitySelect.value === 'yes';
+            
+            if (isAvailable) {
+                priceInput.disabled = false;
+                priceInput.classList.remove('price-disabled');
+                priceInput.placeholder = 'Enter price';
+            } else {
+                priceInput.disabled = true;
+                priceInput.classList.add('price-disabled');
+                priceInput.placeholder = 'Price not available';
+                priceInput.value = '0';
+            }
+        }
+
+        // Function to show prescription type
+        function showPrescriptionType(type) {
+            // Remove active class from all tabs
+            document.querySelectorAll('.prescription-type-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Hide all content
+            document.querySelectorAll('.prescription-type-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Show selected content
+            document.getElementById(`${type}-prescription`).classList.add('active');
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+
         // Function to show tabs
         function showTab(tabName) {
             if (isLoading) return;
@@ -1492,10 +1733,20 @@ $current_time = date('h:i A');
                     body: formData
                 });
                 
+                // First check if response is OK
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
                 const result = await response.json();
                 return result;
+                
             } catch (error) {
-                return { success: false, message: 'Network error: ' + error.message };
+                console.error('AJAX Error:', error);
+                return { 
+                    success: false, 
+                    message: 'Network error: ' + error.message 
+                };
             } finally {
                 hideLoading();
             }
@@ -1544,8 +1795,8 @@ $current_time = date('h:i A');
             const originalText = submitBtn.innerHTML;
             
             // Show loading state
-            submitBtn.classList.add('btn-loading');
             submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
             
             const formData = new FormData(this);
             formData.append('ajax_request', 'true');
@@ -1554,7 +1805,36 @@ $current_time = date('h:i A');
             const result = await makeAjaxRequest(formData);
             
             // Restore button state
-            submitBtn.classList.remove('btn-loading');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalText;
+            
+            if (result.success) {
+                showMessage(result.message, 'success');
+                this.reset();
+            } else {
+                showMessage(result.message, 'error');
+            }
+        });
+
+        // Add External Prescription Form
+        document.getElementById('addExternalPrescriptionForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            if (isLoading) return;
+            
+            const submitBtn = document.getElementById('addExternalPrescriptionBtn');
+            const originalText = submitBtn.innerHTML;
+            
+            // Show loading state
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Adding...';
+            
+            const formData = new FormData(this);
+            formData.append('ajax_request', 'true');
+            formData.append('action', 'add_external_prescription');
+            
+            const result = await makeAjaxRequest(formData);
+            
+            // Restore button state
             submitBtn.disabled = false;
             submitBtn.innerHTML = originalText;
             
@@ -1577,24 +1857,51 @@ $current_time = date('h:i A');
                 const prescriptionId = this.dataset.prescriptionId;
                 
                 // Show loading state
-                submitBtn.classList.add('btn-loading');
                 submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
                 
-                const formData = new FormData(this);
-                formData.append('ajax_request', 'true');
-                formData.append('action', 'update_medicine');
-                
-                const result = await makeAjaxRequest(formData);
-                
-                // Restore button state
-                submitBtn.classList.remove('btn-loading');
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = originalText;
-                
-                if (result.success) {
-                    showMessage(result.message, 'success');
-                } else {
-                    showMessage(result.message, 'error');
+                try {
+                    const formData = new FormData(this);
+                    formData.append('ajax_request', 'true');
+                    formData.append('action', 'update_medicine');
+                    
+                    const result = await makeAjaxRequest(formData);
+                    
+                    if (result.success) {
+                        showMessage(result.message, 'success');
+                        
+                        // Update the badge to reflect new status
+                        const badge = document.querySelector(`#prescription-${prescriptionId} .badge`);
+                        const priceBadge = document.querySelector(`#prescription-${prescriptionId} .prescription-actions .badge`);
+                        
+                        if (formData.get('is_available') === 'no') {
+                            badge.className = 'badge badge-danger';
+                            badge.textContent = 'Unavailable';
+                            if (priceBadge) {
+                                priceBadge.className = 'badge badge-warning';
+                                priceBadge.textContent = 'Price Not Set';
+                            }
+                        } else {
+                            badge.className = 'badge badge-success';
+                            badge.textContent = 'Available';
+                            if (priceBadge && formData.get('medicine_price') > 0) {
+                                priceBadge.className = 'badge badge-primary';
+                                priceBadge.textContent = 'TZS ' + parseFloat(formData.get('medicine_price')).toLocaleString('en-US', {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2
+                                });
+                            }
+                        }
+                        
+                    } else {
+                        showMessage(result.message, 'error');
+                    }
+                } catch (error) {
+                    showMessage('Error updating medicine: ' + error.message, 'error');
+                } finally {
+                    // Restore button state
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
                 }
             });
         });
@@ -1609,24 +1916,27 @@ $current_time = date('h:i A');
                 const originalText = submitBtn.innerHTML;
                 
                 // Show loading state
-                submitBtn.classList.add('btn-loading');
                 submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
                 
-                const formData = new FormData(this);
-                formData.append('ajax_request', 'true');
-                formData.append('action', 'update_lab_price');
-                
-                const result = await makeAjaxRequest(formData);
-                
-                // Restore button state
-                submitBtn.classList.remove('btn-loading');
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = originalText;
-                
-                if (result.success) {
-                    showMessage(result.message, 'success');
-                } else {
-                    showMessage(result.message, 'error');
+                try {
+                    const formData = new FormData(this);
+                    formData.append('ajax_request', 'true');
+                    formData.append('action', 'update_lab_price');
+                    
+                    const result = await makeAjaxRequest(formData);
+                    
+                    if (result.success) {
+                        showMessage(result.message, 'success');
+                    } else {
+                        showMessage(result.message, 'error');
+                    }
+                } catch (error) {
+                    showMessage('Error updating lab price: ' + error.message, 'error');
+                } finally {
+                    // Restore button state
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
                 }
             });
         });

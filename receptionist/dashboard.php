@@ -1192,7 +1192,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                         
                         <div class="form-group">
                             <label class="form-label">Patient Type *</label>
-                            <select name="patient_type" class="form-select" id="updatePatientType" required>
+                            <select name="patient_type" class="form-select" id="updatePatientType" required onchange="updateConsultationFeeForUpdate()">
                                 <option value="">Select Patient Type</option>
                                 <option value="standard">Standard</option>
                                 <option value="child">Child (Under 12)</option>
@@ -1206,6 +1206,7 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
                             <label class="form-label">Consultation Fee (TSh) *</label>
                             <input type="number" name="consultation_fee" class="form-input" id="updateConsultationFee" 
                                    placeholder="Enter consultation fee" min="0" step="100" required>
+                            <small style="color: #64748b; font-size: 0.8rem;">Based on patient type. You can adjust if needed.</small>
                         </div>
                         
                         <button type="submit" name="update_patient" class="btn btn-primary">
@@ -1472,10 +1473,22 @@ $current_user = $user_stmt->fetch(PDO::FETCH_ASSOC);
             'follow_up': <?php echo $fee_settings['consultation_fee_follow_up']; ?>
         };
 
-        // Update consultation fee based on patient type
+        // Update consultation fee based on patient type (for Add form)
         function updateConsultationFee() {
             const patientType = document.getElementById('patientType').value;
             const consultationFeeInput = document.getElementById('consultationFee');
+            
+            if (patientType && feeRates[patientType]) {
+                consultationFeeInput.value = feeRates[patientType];
+            } else {
+                consultationFeeInput.value = '';
+            }
+        }
+
+        // Update consultation fee based on patient type (for Update form)
+        function updateConsultationFeeForUpdate() {
+            const patientType = document.getElementById('updatePatientType').value;
+            const consultationFeeInput = document.getElementById('updateConsultationFee');
             
             if (patientType && feeRates[patientType]) {
                 consultationFeeInput.value = feeRates[patientType];

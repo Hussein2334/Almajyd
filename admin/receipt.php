@@ -19,7 +19,7 @@ if (!$payment_id) {
     die("Payment ID is required!");
 }
 
-// Fetch payment and receipt details
+// Fetch payment and receipt details with ALL items
 $stmt = $pdo->prepare("
     SELECT 
         p.*, 
@@ -36,12 +36,19 @@ $stmt = $pdo->prepare("
         u.full_name as cashier_name,
         doc.full_name as doctor_name,
         cf.diagnosis,
-        (SELECT GROUP_CONCAT(CONCAT(pr.medicine_name, ' (', pr.dosage, ')') SEPARATOR ', ') 
+        cf.symptoms,
+        cf.created_at as visit_date,
+        -- Get all medications with details
+        (SELECT GROUP_CONCAT(CONCAT(pr.medicine_name, ' (', pr.dosage, ') - TZS ', FORMAT(pr.medicine_price, 2)) SEPARATOR '; ') 
          FROM prescriptions pr 
-         WHERE pr.checking_form_id = p.checking_form_id AND pr.status = 'dispensed') as medications,
-        (SELECT GROUP_CONCAT(CONCAT(lt.test_type, ': ', lt.results) SEPARATOR ' | ') 
+         WHERE pr.checking_form_id = p.checking_form_id) as medications,
+        -- Get all lab tests with details
+        (SELECT GROUP_CONCAT(CONCAT(lt.test_type, ' - TZS ', FORMAT(lt.lab_price, 2)) SEPARATOR '; ') 
          FROM laboratory_tests lt 
-         WHERE lt.checking_form_id = p.checking_form_id AND lt.status = 'completed') as lab_tests
+         WHERE lt.checking_form_id = p.checking_form_id) as lab_tests,
+        -- Calculate totals
+        (SELECT SUM(medicine_price) FROM prescriptions pr WHERE pr.checking_form_id = p.checking_form_id) as total_medicine_cost,
+        (SELECT SUM(lab_price) FROM laboratory_tests lt WHERE lt.checking_form_id = p.checking_form_id) as total_lab_cost
     FROM payments p
     JOIN patients pt ON p.patient_id = pt.id
     JOIN checking_forms cf ON p.checking_form_id = cf.id
@@ -58,24 +65,24 @@ if (!$payment) {
     die("Payment not found!");
 }
 
-$total_amount = $payment['amount'] + ($payment['consultation_fee'] ?? 0);
+// Calculate totals
+$consultation_fee = $payment['consultation_fee'] ?? 0;
+$medicines_total = $payment['total_medicine_cost'] ?? 0;
+$lab_tests_total = $payment['total_lab_cost'] ?? 0;
+$total_amount = $consultation_fee + $medicines_total + $lab_tests_total;
 
-// GENERATE RECEIPT NUMBER IF NOT EXISTS - FIXED WITH PROPER AMOUNT_PAID
+// GENERATE RECEIPT NUMBER IF NOT EXISTS
 if (empty($payment['receipt_number'])) {
-    // Generate new receipt number
     $receipt_number = 'RCP' . date('Ymd') . str_pad($payment_id, 4, '0', STR_PAD_LEFT);
     
-    // Get amount_paid from payments table to avoid null values
     $amount_paid = $payment['amount_paid'] ?? $total_amount;
     $change_amount = $amount_paid - $total_amount;
     
-    // Ensure amount_paid is not null and is sufficient
     if ($amount_paid === null || $amount_paid < $total_amount) {
         $amount_paid = $total_amount;
         $change_amount = 0;
     }
     
-    // Insert into receipts table if not exists
     $check_receipt = $pdo->prepare("SELECT * FROM receipts WHERE payment_id = ?");
     $check_receipt->execute([$payment_id]);
     
@@ -95,7 +102,6 @@ if (empty($payment['receipt_number'])) {
                 $_SESSION['user_id']
             ]);
             
-            // Update payment with receipt number
             $payment['receipt_number'] = $receipt_number;
             $payment['amount_paid'] = $amount_paid;
             $payment['change_amount'] = $change_amount;
@@ -103,7 +109,6 @@ if (empty($payment['receipt_number'])) {
             $payment['cashier_name'] = $_SESSION['full_name'];
             
         } catch (PDOException $e) {
-            // If insert fails, use temporary receipt number without saving to database
             $receipt_number = 'TEMP' . date('YmdHis') . $payment_id;
             $payment['receipt_number'] = $receipt_number;
             $payment['amount_paid'] = $amount_paid;
@@ -123,6 +128,27 @@ $cashier_name = !empty($payment['cashier_name']) ? $payment['cashier_name'] : $_
 $amount_paid = $payment['amount_paid'] ?? $total_amount;
 $change_amount = $payment['change_amount'] ?? 0;
 $payment_method = $payment['payment_method'] ?? 'cash';
+
+// Parse medications and lab tests for display
+$medications_list = [];
+if (!empty($payment['medications'])) {
+    $meds = explode('; ', $payment['medications']);
+    foreach ($meds as $med) {
+        if (!empty(trim($med))) {
+            $medications_list[] = $med;
+        }
+    }
+}
+
+$lab_tests_list = [];
+if (!empty($payment['lab_tests'])) {
+    $tests = explode('; ', $payment['lab_tests']);
+    foreach ($tests as $test) {
+        if (!empty(trim($test))) {
+            $lab_tests_list[] = $test;
+        }
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -142,7 +168,9 @@ $payment_method = $payment['payment_method'] ?? 'cash';
             font-family: 'Courier New', monospace;
             background: white;
             color: black;
-            padding: 20px;
+            padding: 10px;
+            font-size: 12px;
+            line-height: 1.2;
         }
 
         /* Print-specific styles */
@@ -161,7 +189,7 @@ $payment_method = $payment['payment_method'] ?? 'cash';
                 width: 80mm !important;
                 max-width: 80mm !important;
                 margin: 0 !important;
-                padding: 10px !important;
+                padding: 8px !important;
                 box-shadow: none !important;
                 border: none !important;
             }
@@ -177,109 +205,97 @@ $payment_method = $payment['payment_method'] ?? 'cash';
             max-width: 80mm;
             margin: 0 auto;
             background: white;
-            padding: 15px;
+            padding: 10px;
             border: 1px solid #000;
-            font-size: 12px;
-            line-height: 1.3;
         }
 
         .receipt-header {
             text-align: center;
             border-bottom: 1px solid #000;
-            padding-bottom: 8px;
-            margin-bottom: 10px;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
         }
 
         .receipt-header h1 {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: bold;
-            margin-bottom: 3px;
+            margin-bottom: 2px;
             text-transform: uppercase;
         }
 
         .receipt-header p {
-            font-size: 10px;
-            margin: 2px 0;
-        }
-
-        .receipt-details {
-            margin-bottom: 8px;
+            font-size: 9px;
+            margin: 1px 0;
         }
 
         .receipt-item {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 4px;
-            padding-bottom: 4px;
+            margin-bottom: 3px;
+            padding-bottom: 3px;
             border-bottom: 1px dashed #ccc;
         }
 
         .receipt-section {
-            margin-bottom: 10px;
-            padding-bottom: 8px;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
             border-bottom: 1px solid #000;
         }
 
         .receipt-section-title {
             font-weight: bold;
             text-align: center;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             background: #f0f0f0;
-            padding: 3px;
+            padding: 2px;
+            font-size: 11px;
         }
 
         .receipt-total {
             border-top: 2px solid #000;
-            padding-top: 8px;
-            margin-top: 8px;
+            padding-top: 6px;
+            margin-top: 6px;
             font-weight: bold;
-            font-size: 13px;
-        }
-
-        .text-center {
-            text-align: center;
-        }
-
-        .text-right {
-            text-align: right;
+            font-size: 12px;
         }
 
         .barcode {
             text-align: center;
-            margin: 10px 0;
-            padding: 5px;
+            margin: 8px 0;
+            padding: 4px;
         }
 
         .thank-you {
             text-align: center;
             font-style: italic;
-            margin-top: 10px;
-            padding-top: 8px;
+            margin-top: 8px;
+            padding-top: 6px;
             border-top: 1px dashed #000;
+            font-size: 10px;
         }
 
         .footer {
             text-align: center;
-            font-size: 9px;
-            margin-top: 8px;
+            font-size: 8px;
+            margin-top: 6px;
             color: #666;
         }
 
         .actions {
             text-align: center;
-            margin: 20px 0;
-            padding: 15px;
+            margin: 15px 0;
+            padding: 10px;
             background: #f8f9fa;
-            border-radius: 8px;
+            border-radius: 5px;
         }
 
         .btn {
-            padding: 10px 20px;
-            margin: 5px;
+            padding: 8px 15px;
+            margin: 3px;
             border: none;
-            border-radius: 5px;
+            border-radius: 3px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 11px;
             text-decoration: none;
             display: inline-block;
         }
@@ -304,65 +320,84 @@ $payment_method = $payment['payment_method'] ?? 'cash';
         }
         
         .receipt-number {
-            font-size: 14px;
+            font-size: 12px;
             font-weight: bold;
             color: #000;
             background: #f8f9fa;
-            padding: 5px;
+            padding: 4px;
             border: 1px solid #000;
             text-align: center;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+        }
+        
+        .items-list {
+            margin: 5px 0;
+        }
+        
+        .item-row {
+            margin-bottom: 2px;
+            padding: 1px 0;
+            font-size: 9px;
+        }
+        
+        .compact-text {
+            font-size: 9px;
         }
         
         .warning {
             background: #fff3cd;
             color: #856404;
-            padding: 10px;
+            padding: 6px;
             border: 1px solid #ffeaa7;
-            border-radius: 5px;
-            margin-bottom: 15px;
-            font-size: 11px;
+            border-radius: 3px;
+            margin-bottom: 8px;
+            font-size: 9px;
         }
         
         .success {
             background: #d1fae5;
             color: #065f46;
-            padding: 10px;
+            padding: 6px;
             border: 1px solid #a7f3d0;
-            border-radius: 5px;
-            margin-bottom: 15px;
-            font-size: 11px;
+            border-radius: 3px;
+            margin-bottom: 8px;
+            font-size: 9px;
+        }
+        
+        .cost-breakdown {
+            margin: 6px 0;
+        }
+        
+        .cost-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+            font-size: 10px;
         }
     </style>
     <link rel="icon" href="../images/logo.jpg">
 </head>
-<body>
+<body onload="window.print()">
     <!-- Action buttons - hidden when printing -->
     <div class="actions no-print">
         <button class="btn btn-print" onclick="window.print()">
-            🖨️ Print Receipt
+            🖨️ Print
         </button>
-        <a href="print_receipts.php" class="btn btn-back">
-            📋 Back to Receipts
-        </a>
         <a href="dashboard.php" class="btn btn-dashboard">
-            🏠 Dashboard
+            📊 Dashboard
         </a>
-        <button class="btn btn-print" onclick="autoPrint()">
-            🚀 Auto Print
-        </button>
     </div>
 
     <!-- Receipt Content -->
-    <div class="receipt-container" id="receiptContent">
+    <div class="receipt-container">
         <!-- Status Messages -->
         <?php if (strpos($receipt_number, 'TEMP') === 0): ?>
         <div class="warning">
-            ⚠️ TEMPORARY RECEIPT - Data not saved to database
+            ⚠️ TEMPORARY RECEIPT
         </div>
         <?php else: ?>
         <div class="success">
-            ✅ OFFICIAL RECEIPT - Database Verified
+            ✅ OFFICIAL RECEIPT
         </div>
         <?php endif; ?>
 
@@ -370,7 +405,7 @@ $payment_method = $payment['payment_method'] ?? 'cash';
         <div class="receipt-header">
             <h1>ALMAJYD DISPENSARY</h1>
             <p>Quality Healthcare Services</p>
-            <p>Tel: +255 777 567 478 | Email: amrykassim@gmail.com</p>
+            <p>Tel: +255 777 567 478</p>
             <p>OFFICIAL RECEIPT</p>
         </div>
 
@@ -379,24 +414,14 @@ $payment_method = $payment['payment_method'] ?? 'cash';
             RECEIPT: <?php echo $receipt_number; ?>
         </div>
 
-        <!-- Receipt Number and Date -->
-        <div class="receipt-details">
-            <div class="receipt-item">
-                <span>Receipt No:</span>
-                <span><strong><?php echo $receipt_number; ?></strong></span>
-            </div>
-            <div class="receipt-item">
-                <span>Date & Time:</span>
-                <span><?php echo $current_date; ?></span>
-            </div>
-            <div class="receipt-item">
-                <span>Payment ID:</span>
-                <span>#<?php echo $payment_id; ?></span>
-            </div>
-            <div class="receipt-item">
-                <span>Issued By:</span>
-                <span><?php echo htmlspecialchars($cashier_name); ?> (Admin)</span>
-            </div>
+        <!-- Receipt Details -->
+        <div class="receipt-item">
+            <span>Date & Time:</span>
+            <span><?php echo $current_date; ?></span>
+        </div>
+        <div class="receipt-item">
+            <span>Issued By:</span>
+            <span><?php echo htmlspecialchars($cashier_name); ?></span>
         </div>
 
         <!-- Patient Information -->
@@ -412,11 +437,7 @@ $payment_method = $payment['payment_method'] ?? 'cash';
             </div>
             <div class="receipt-item">
                 <span>Age/Gender:</span>
-                <span><?php echo $payment['age'] . ' yrs / ' . ucfirst($payment['gender']); ?></span>
-            </div>
-            <div class="receipt-item">
-                <span>Phone:</span>
-                <span><?php echo $payment['phone'] ?: 'N/A'; ?></span>
+                <span><?php echo $payment['age'] . 'y / ' . ucfirst($payment['gender']); ?></span>
             </div>
             <div class="receipt-item">
                 <span>Doctor:</span>
@@ -424,135 +445,149 @@ $payment_method = $payment['payment_method'] ?? 'cash';
             </div>
         </div>
 
-        <!-- Diagnosis and Treatment -->
+        <!-- Medical Information -->
         <?php if (!empty($payment['diagnosis'])): ?>
         <div class="receipt-section">
             <div class="receipt-section-title">MEDICAL INFORMATION</div>
             <div class="receipt-item" style="flex-direction: column; align-items: flex-start;">
                 <div><strong>Diagnosis:</strong></div>
-                <div style="margin-top: 3px;"><?php echo htmlspecialchars($payment['diagnosis']); ?></div>
+                <div style="margin-top: 2px;" class="compact-text"><?php echo htmlspecialchars($payment['diagnosis']); ?></div>
             </div>
-            
-            <?php if (!empty($payment['medications'])): ?>
-            <div class="receipt-item" style="flex-direction: column; align-items: flex-start; margin-top: 5px;">
-                <div><strong>Medications:</strong></div>
-                <div style="margin-top: 3px; font-size: 11px;"><?php echo htmlspecialchars($payment['medications']); ?></div>
-            </div>
-            <?php endif; ?>
-            
-            <?php if (!empty($payment['lab_tests'])): ?>
-            <div class="receipt-item" style="flex-direction: column; align-items: flex-start; margin-top: 5px;">
-                <div><strong>Lab Tests:</strong></div>
-                <div style="margin-top: 3px; font-size: 11px;"><?php echo htmlspecialchars($payment['lab_tests']); ?></div>
-            </div>
-            <?php endif; ?>
         </div>
         <?php endif; ?>
 
-        <!-- Payment Breakdown -->
+        <!-- Cost Breakdown -->
         <div class="receipt-section">
-            <div class="receipt-section-title">PAYMENT BREAKDOWN</div>
+            <div class="receipt-section-title">COST BREAKDOWN</div>
             
-            <div class="receipt-item">
-                <span>Consultation Fee:</span>
-                <span>TSh <?php echo number_format($payment['consultation_fee'] ?? 0, 2); ?></span>
+            <div class="cost-breakdown">
+                <!-- Consultation Fee -->
+                <?php if ($consultation_fee > 0): ?>
+                <div class="cost-item">
+                    <span>Consultation Fee:</span>
+                    <span>TZS <?php echo number_format($consultation_fee, 2); ?></span>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Medications -->
+                <?php if (!empty($medications_list)): ?>
+                <div style="margin: 4px 0;">
+                    <div style="font-weight: bold; margin-bottom: 2px;">Medications:</div>
+                    <?php foreach ($medications_list as $med): ?>
+                    <div class="item-row">• <?php echo htmlspecialchars($med); ?></div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+                
+                <!-- Laboratory Tests -->
+                <?php if (!empty($lab_tests_list)): ?>
+                <div style="margin: 4px 0;">
+                    <div style="font-weight: bold; margin-bottom: 2px;">Lab Tests:</div>
+                    <?php foreach ($lab_tests_list as $test): ?>
+                    <div class="item-row">• <?php echo htmlspecialchars($test); ?></div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
             </div>
+        </div>
+
+        <!-- Payment Summary -->
+        <div class="receipt-section">
+            <div class="receipt-section-title">PAYMENT SUMMARY</div>
             
-            <?php if ($payment['medicine_amount'] > 0): ?>
-            <div class="receipt-item">
-                <span>Medicine Amount:</span>
-                <span>TSh <?php echo number_format($payment['medicine_amount'], 2); ?></span>
+            <div class="cost-breakdown">
+                <?php if ($consultation_fee > 0): ?>
+                <div class="cost-item">
+                    <span>Consultation:</span>
+                    <span>TZS <?php echo number_format($consultation_fee, 2); ?></span>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($medicines_total > 0): ?>
+                <div class="cost-item">
+                    <span>Medicines:</span>
+                    <span>TZS <?php echo number_format($medicines_total, 2); ?></span>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($lab_tests_total > 0): ?>
+                <div class="cost-item">
+                    <span>Laboratory:</span>
+                    <span>TZS <?php echo number_format($lab_tests_total, 2); ?></span>
+                </div>
+                <?php endif; ?>
+                
+                <div class="receipt-total">
+                    <div class="receipt-item">
+                        <span>TOTAL AMOUNT:</span>
+                        <span>TZS <?php echo number_format($total_amount, 2); ?></span>
+                    </div>
+                </div>
+                
+                <div class="receipt-item">
+                    <span>Amount Paid:</span>
+                    <span>TZS <?php echo number_format($amount_paid, 2); ?></span>
+                </div>
+                
+                <?php if ($change_amount > 0): ?>
+                <div class="receipt-item">
+                    <span>Change Amount:</span>
+                    <span>TZS <?php echo number_format($change_amount, 2); ?></span>
+                </div>
+                <?php endif; ?>
+                
+                <div class="receipt-item">
+                    <span>Payment Method:</span>
+                    <span style="text-transform: uppercase; font-weight: bold;"><?php echo $payment_method; ?></span>
+                </div>
             </div>
-            <?php endif; ?>
-            
-            <?php if ($payment['lab_amount'] > 0): ?>
-            <div class="receipt-item">
-                <span>Lab Amount:</span>
-                <span>TSh <?php echo number_format($payment['lab_amount'], 2); ?></span>
-            </div>
-            <?php endif; ?>
-            
-            <div class="receipt-item receipt-total">
-                <span>TOTAL AMOUNT:</span>
-                <span>TSh <?php echo number_format($total_amount, 2); ?></span>
-            </div>
-            
-            <div class="receipt-item">
-                <span>Amount Paid:</span>
-                <span>TSh <?php echo number_format($amount_paid, 2); ?></span>
-            </div>
-            
-            <?php if ($change_amount > 0): ?>
-            <div class="receipt-item">
-                <span>Change Amount:</span>
-                <span>TSh <?php echo number_format($change_amount, 2); ?></span>
-            </div>
-            <?php endif; ?>
-            
-            <div class="receipt-item">
-                <span>Payment Method:</span>
-                <span style="text-transform: uppercase;"><?php echo $payment_method; ?></span>
-            </div>
-            
-            <?php if (!empty($payment['transaction_id'])): ?>
-            <div class="receipt-item">
-                <span>Transaction ID:</span>
-                <span><?php echo $payment['transaction_id']; ?></span>
-            </div>
-            <?php endif; ?>
         </div>
 
         <!-- Barcode Area -->
         <div class="barcode">
-            <div style="border: 1px solid #000; padding: 5px; display: inline-block;">
-                [BARCODE AREA]
+            <div style="border: 1px solid #000; padding: 4px; display: inline-block; font-family: monospace;">
+                <?php echo str_repeat('| ', 15); ?>
             </div>
-            <div style="font-size: 10px; margin-top: 3px;">
+            <div style="font-size: 8px; margin-top: 2px;">
                 <?php echo $receipt_number; ?>
             </div>
         </div>
 
         <!-- Thank You Message -->
         <div class="thank-you">
-            Thank you for choosing Almajyd Dispensary!
+            Thank you for choosing Almajyd Dispensary!<br>
+            <strong>Get Well Soon!</strong>
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            <div>Issued by: <?php echo htmlspecialchars($cashier_name); ?> (Administrator)</div>
+            <div>Issued by: <?php echo htmlspecialchars($cashier_name); ?></div>
             <div>Date: <?php echo $current_date; ?></div>
-            <div style="margin-top: 5px;">
-                *** This is a computer generated receipt ***
+            <div style="margin-top: 4px;">
+                *** Computer generated receipt ***
             </div>
-            <div>Printed on: <?php echo $current_date; ?></div>
         </div>
     </div>
 
     <script>
-        // Auto-print function
-        function autoPrint() {
+        // Auto-print when page loads
+        window.onload = function() {
+            setTimeout(function() {
+                window.print();
+            }, 500);
+        };
+
+        // Redirect after printing
+        window.onafterprint = function() {
+            setTimeout(function() {
+                window.location.href = 'dashboard.php';
+            }, 1000);
+        };
+
+        // Manual print function
+        function printReceipt() {
             window.print();
         }
-
-        // Auto-print option on page load
-        window.onload = function() {
-            // Uncomment the line below to auto-print when page loads
-            // setTimeout(() => { window.print(); }, 1000);
-        };
-
-        // Keyboard shortcut for printing
-        document.addEventListener('keydown', function(e) {
-            if (e.ctrlKey && e.key === 'p') {
-                e.preventDefault();
-                window.print();
-            }
-        });
-
-        // Print dialog closed event
-        window.onafterprint = function() {
-            console.log('Print dialog closed');
-            // You can add any post-print actions here
-        };
     </script>
 </body>
 </html>
